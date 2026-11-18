@@ -2,10 +2,11 @@
 
 > 종합뉴스 방송 녹화본을 **큐시트·원고(MARS-L)**에 맞춰 리포트 단위로 자동 분할하고, 제목·설명·썸네일을 만든 뒤 검수를 거쳐 YouTube 등 채널에 예약 업로드하는 사내 웹 애플리케이션.
 
-- 문서 버전: v0.2 (2026-11-18)
+- 문서 버전: v0.3 (2026-11-18)
 - 변경 이력
   - v0.1: STT + LLM 기반 경계 탐지
   - v0.2: **큐시트·원고 + 원고-오디오 정렬 기반으로 전환** (STT는 보조 수단), 업로드 대상을 **리포트(R)로 한정**
+  - v0.3: MARS-L 외부 API 명세 반영(3.1~3.2, 5.4). 형식(R/S)·예정 길이가 API에 없어 대안 규칙 추가
 - 상태: 초안 (16장 미결 사항 확인 필요)
 
 ---
@@ -56,23 +57,70 @@
 
 ## 3. 입력 데이터 (MARS-L)
 
-### 3.1 큐시트
-2026-11-18 뉴스투데이 큐시트에서 확인한 필드:
+### 3.1 MARS-L 외부 API
+출처: 「지역MBC-NRCS-B106 홈페이지 인터페이스 명세서」 V0.2 (2024.01.04)
 
+| ID | 이름 | 메서드·경로 | 용도 |
+|---|---|---|---|
+| IF_MARSL_001 | 큐시트 목록 조회 | `GET /api/external/cuesheet/list?startDate=&endDate=` | 방송일 + 프로그램명으로 녹화본에 맞는 큐시트 찾기 |
+| IF_MARSL_002 | 큐시트 정보 조회 | `GET /api/external/cuesheet/{cueSheetId}` | 판 수(`cueSheetVersion`) 폴링 → 변경 감지 |
+| IF_MARSL_003 | 큐시트 상세(아이템) 조회 | `GET /api/external/cuesheet/{cueSheetId}/detailed-item-list` | 아이템 순서 + 원고 본문 |
+| IF_MARSL_004 | 취재데스크 기사 조회 | `GET /api/external/article/list?startDate=&endDate=&page=&size=` | 기사 형식·예정 시간 보조 정보 |
+
+- 기본 URL: `https://api.marsl.co.kr` (HTTPS 필수)
+- 인증: 헤더에 지역사 액세스 키. 명세서에 `Mars-Secret`과 `MarsL-Secret`이 섞여 있어 실제 이름을 확인해야 한다
+- 공통 응답: `{status, success, data}`. 실패 시 `{errorCode, message, details, success:false}` — 40000(잘못된 요청), 20001(권한 없음), 20000(인증 오류), 50000(시스템 오류)
+
+**주요 필드와 용도**
+
+| API | 필드 | 용도 |
+|---|---|---|
+| 001/002 | `cueSheetId` | 큐시트 식별자 |
+| 001/002 | `programName`, `broadcastDate`, `broadcastStartTime`, `broadcastDurationTime`(분) | 녹화본과 매칭. 예정 총 길이 검증 |
+| 001/002 | `cueSheetVersion` | 판 수. **값이 바뀌면 큐시트가 수정된 것** |
+| 001/002 | `anchor1Name`, `anchor2Name` | 메타데이터 |
+| 003 | `cueSheetItemOrderNumber` | 방송 순서 |
+| 003 | `cueSheetItemTitle`, `article.articleTitle` | 제목 |
+| 003 | `article.articleContent` | **원고 본문** (줄바꿈 `\n` 포함 텍스트) |
+| 003 | `article.reporterName` | 기자명, 사인오프 검증 |
+| 003 | `article.memo`, `cueSheetItemContent`, `remark` | 썸네일·상단 문구, 아이템 형식 후보 (실제 값 확인 필요) |
+| 004 | `ancMentCttTime`, `artclCttTime`, `artclExtTime` | 앵커 멘트·기사 예정 시간(초) |
+| 004 | `articleTypeCode`, `articleTypeCodeName` | 기사 형식(예: `typ_001` 스트레이트) |
+
+**데이터 품질 주의**
+- `programName`에 공백이 붙어 온다(`"뉴스데스크      "`) → trim 후 비교
+- `cueSheetItemOrderNumber`가 예시는 문자열, 명세는 Integer → 둘 다 허용
+- 예시의 `broadcastEndTime`(`"2023-08-17T08:40"`)이 `broadcastDate`(08-18)와 날짜가 다름 → 신뢰하지 않음
+- 날짜 형식이 섞여 있음(`yyyy-MM-dd HH:mm:ss`, ISO) → 관대하게 파싱
+- 필드 이름 대소문자 불일치(`updateDatetime`/`updateDateTime`, `inputrUserName`/`inputUserName`) → 별칭 허용
+
+### 3.2 큐시트 화면과 API의 차이
+큐시트 출력물(PDF)에는 있지만 API 명세에는 **없는 정보**와 그 대안:
+
+| 큐시트 화면 | API | 대안 |
+|---|---|---|
+| 형식 `R`/`S` | 없음 | ① `remark`·`cueSheetItemContent`에 "리포트"가 오는지 확인 (화면 비고 칸에 "리포트"가 있음) ② 원고에 `◀리포트▶` 섹션과 사인오프가 있으면 R로 판별 ③ 004 API의 `articleTypeCode` 매칭 |
+| 아이템별 예정 길이(시간·합계) | 없음 (003) | ① 004 API의 `ancMentCttTime + artclCttTime`을 제목·기자·날짜로 매칭 (003 응답에 `articleId`가 없어 직접 연결 불가) ② 원고 글자 수로 낭독 시간 추정 |
+| V(송출 채널), A(오디오 소스) | 없음 | 필요 없음. 아이템 경계의 화면 컷은 영상에서 직접 검출 |
+| 원고 왼쪽 칸 메모(썸네일, 상단, 수퍼) | 불명확 | `memo` 필드 또는 `articleContent` 안의 특정 표기일 가능성. 실제 응답으로 확인 필요 |
+
+- **형식 판별 규칙** (우선순위): `remark`/`cueSheetItemContent`의 명시적 값 → 원고 구조(`◀리포트▶` + 사인오프) → 004 매칭. 판별 결과와 근거를 저장하고, 검수 화면에서 사람이 바꿀 수 있게 한다.
+- **예정 길이**는 정렬의 대략 위치 추정(5-1)에만 쓰인다. 없어도 원고 낭독 시간 추정치로 대체할 수 있으므로 필수는 아니다.
+
+### 3.3 큐시트 화면 정보 (참고: 2026-11-18 뉴스투데이 출력물)
 | 필드 | 예 | 용도 |
 |---|---|---|
 | 프로그램명, 방송일 | 뉴스투데이, 2026-11-18 | 녹화본과 매칭하는 키 |
 | 판 수, 확정일시 | 3, 2026-11-18 06:03 | 최종판 판별 |
 | No | 1~23 | 방송 순서 |
 | 형식 | `R`(리포트), `S`(단신), 빈칸(타이틀·클로징 등) | **R만 업로드 대상** |
-| 시간 / 합계 | 03:07 / 04:07 | 예정 길이, 누적 시각 → 대략적 위치 추정, 검증 |
+| 시간 / 합계 | 03:07 / 04:07 | 예정 길이, 누적 시각 |
 | 제목 | 2028년 통합목포고 개교..기존 부지에 컨벤션센터? | 제목 기본값 |
-| V | V1 / V2 / V3 | 송출 채널. 아이템마다 V1↔V2가 교대 → **아이템 경계에서 화면 컷 발생** |
-| A | 앵커(사람 아이콘) / 테이프 | 오디오 소스 |
-| 기자 | 김양훈 | 메타데이터, 사인오프 문장 검증 |
-| 비고 | 리포트 | 보조 판별 |
+| V | V1 / V2 / V3 | 아이템마다 V1↔V2가 교대 → **아이템 경계에서 화면 컷 발생** |
+| 기자 | 김양훈 | 메타데이터, 사인오프 검증 |
+| 비고 | 리포트 | 형식 판별 후보 |
 
-### 3.2 원고 (아이템별)
+### 3.4 원고 (아이템별)
 | 요소 | 예 | 처리 |
 |---|---|---|
 | 헤더 | 제목, 기자(부서), 출고 시각, 길이 | 메타데이터 |
@@ -148,12 +196,16 @@ DRAFT → APPROVED → RENDERING → RENDERED → UPLOADING → UPLOADED
 **뉴스룸 연동 (`NewsroomProvider` 인터페이스)**
 ```python
 class NewsroomProvider(Protocol):
-    def find_rundown(self, program_id: str, broadcast_date: date) -> RundownRef | None: ...
-    def get_rundown(self, ref: RundownRef) -> Rundown: ...          # 최종판
-    def get_script(self, item_ref: ItemRef) -> RawScript: ...
+    def list_rundowns(self, start: date, end: date) -> list[RundownSummary]: ...   # IF_MARSL_001
+    def get_rundown(self, cue_sheet_id: int) -> RundownSummary: ...                # IF_MARSL_002 (판 수 확인)
+    def get_items(self, cue_sheet_id: int) -> list[RundownItemRaw]: ...            # IF_MARSL_003 (원고 포함)
+    def list_articles(self, start: date, end: date) -> Iterator[ArticleRaw]: ...   # IF_MARSL_004 (페이지 순회)
 ```
-- 1차 구현: MARS-L API 클라이언트. API 명세를 받기 전에는 큐시트 PDF 예시를 바탕으로 만든 **JSON 픽스처를 쓰는 Fake 구현**으로 개발한다.
-- 정렬 직전에 큐시트를 **다시 조회**해 최종판을 쓴다. 판이 바뀌면 이전 판과의 차이(추가/삭제/순서 변경)를 기록한다.
+- 구현: `MarsLProvider`(httpx, 액세스 키 헤더, 타임아웃 10초, 429·5xx 지수 백오프 재시도) + `FakeNewsroomProvider`(API 응답 형식 그대로의 JSON 픽스처)
+- 원본 응답 JSON은 그대로 저장한다(파서 개선 후 재파싱, 장애 분석용)
+- **큐시트 매칭**: 방송일로 목록을 조회 → `programName`(trim)이 프로그램 프로필의 이름과 같은 것 → 여러 개면 `broadcastStartTime`이 가장 가까운 것. 그래도 애매하면 업로드 폼에서 사용자가 고른다
+- **최종판 사용**: 정렬 직전에 `cueSheetVersion`을 다시 확인하고, 바뀌었으면 아이템을 다시 조회한다. 이전 판과의 차이(추가/삭제/순서 변경)를 기록한다
+- **형식 판별**과 **예정 길이**는 3.2의 대안 규칙을 따른다. 004 매칭은 `articleTitle`(공백·특수문자 정규화) + `reporterName` + 날짜로 하고, 매칭 실패는 오류가 아니다
 
 **원고 파서**
 - 입력: 원고 원문(본문 + 왼쪽 칸 메모)
@@ -477,7 +529,10 @@ storage/jobs/{job_id}/
 | 2026-11-18 | 업로드 대상은 리포트(R)만. 단신·헤드라인·타이틀·클로징 제외 |
 
 ## 16. 미결 사항 (확인 필요)
-1. **MARS-L API 명세와 접근 방법**: 인증 방식, 큐시트·원고 조회 엔드포인트, 응답 형식(JSON?), 이 앱 서버에서 네트워크로 접근 가능한지. 원고 왼쪽 칸 메모(썸네일, 상단, 수퍼)가 별도 필드로 오는지 본문과 섞여 오는지
+1. **MARS-L 실제 응답 확인** (명세서는 받음, 3.1 참고)
+   - 2026-11-18 뉴스투데이의 `detailed-item-list` 실제 응답 1건: 리포트 아이템의 `articleContent`에 `◀앵커▶`·`◀END▶` 표기가 그대로 오는지, 원고 왼쪽 칸 메모(썸네일·상단)가 `memo`에 오는지, `remark`/`cueSheetItemContent`에 "리포트" 같은 형식 정보가 오는지
+   - 인증 헤더 이름(`Mars-Secret` / `MarsL-Secret`)과 경로 접두어(`/api/external` / `/external`)
+   - 액세스 키 발급, 앱 서버에서 `api.marsl.co.kr`로의 네트워크 접근(IP 허용 목록 여부)
 2. **녹화본 샘플**: 2026-11-18 뉴스투데이 녹화본 (정렬 PoC와 첫 골든셋에 사용)
 3. **녹화본 범위**: 녹화본이 프로그램 시작부터 정확히 시작하는지, 앞뒤에 다른 방송이 붙어 있는지
 4. **대상 프로그램**: 뉴스투데이 외에 어떤 프로그램(예: 저녁 종합뉴스)을 처리하는지, 하루 몇 회인지 → YouTube 할당량 증설 규모 결정
