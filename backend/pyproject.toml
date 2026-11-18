@@ -1,0 +1,15 @@
+[project]
+name = "news-clipper-backend"
+version = "0.1.0"
+description = "News Clipper backend: cue sheet/script ingestion, alignment, clipping, publishing"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.7",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

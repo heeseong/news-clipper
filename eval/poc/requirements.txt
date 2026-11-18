@@ -1,0 +1,8 @@
+# PoC alignment (CPU). Install torch from the CPU index:
+#   uv pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+transformers>=4.40
+ctc-segmentation>=1.7
+soundfile
+numpy
+pdfplumber
+pydantic>=2.7
