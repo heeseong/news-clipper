@@ -80,13 +80,16 @@ def _join(lines, full_x1: float, gap: float, sep: str) -> str:
 
 
 def read_cuesheet(path: Path) -> dict:
-    page = pdfplumber.open(path).pages[0]
-    head = page.extract_text() or ""
+    pages = pdfplumber.open(path).pages
+    head = pages[0].extract_text() or ""
     m_prog = re.search(r"^\s*(\S.*?)\s*\((\d{4}-\d{2}-\d{2})\)\s*$", head, re.M)
     m_conf = re.search(r"확정일시:\s*([\d-]+ [\d:]+)", head)
     m_ver = re.search(r"판\s*수:\s*(\d+)", head)
-    rows = page.extract_table()
-    header, body = rows[0], rows[1:]
+    rows: list[list] = []
+    for page in pages:  # the table continues across pages; only the first has a header row
+        rows.extend(page.extract_table() or [])
+    header = rows[0]
+    body = [r for r in rows[1:] if r and r != header and (r[0] or "").strip().isdigit()]
     idx = {name: header.index(name) for name in ("No", "형식", "시간", "합계", "제목", "기자", "비고")}
     items = []
     for r in body:
@@ -126,7 +129,7 @@ def read_scripts(path: Path) -> list[dict]:
         notes = _lines(page.crop((25, TOP, BODY_X0, BOTTOM)))
         key = (title, header)
         if not scripts or scripts[-1]["key"] != key:
-            m_rep = re.match(r"^(\S+?)\((\S+?)\)", header)
+            m_rep = re.match(r"^([^\s(]+)(?:\((\S+?)\))?\s+출고", header)
             m_out = re.search(r"출고:\s*([\d-]+ [\d:]+)", header)
             m_len = re.search(r"길이:\s*([\d:]+)", header)
             scripts.append(
