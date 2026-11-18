@@ -123,6 +123,11 @@ def test_warnings():
     assert any(w.startswith("UNKNOWN_MARKER") for w in sc.warnings)
 
 
+def test_bracket_directives_removed():
+    sc = parse_script("◀ 리포트 ▶\n\n[영상] 홈런\n예상을 뒤집은 건 장타력이었습니다.\n\nMBC뉴스 홍길동입니다.")
+    assert [s.text for s in sc.sentences][0] == "예상을 뒤집은 건 장타력이었습니다."
+
+
 def test_clean_spoken_keeps_number_slashes():
     assert clean_spoken("비율은 1/2입니다.//") == "비율은 1/2입니다."
     assert clean_spoken("*목포여자고등학교* 개교 (CG)") == "개교"
@@ -187,3 +192,40 @@ def test_parse_duration():
     assert parse_duration("1:02:03") == 3723
     assert parse_duration(90) == 90
     assert parse_duration("") is None
+
+
+def test_other_station_report_is_not_uploaded():
+    base = {
+        "cueSheetItemOrderNumber": "6",
+        "article": {"articleContent": REPORT, "reporterName": "김갑동"},
+        "remark": "리포트",
+    }
+    own = build_item({**base, "article": {**base["article"], "articleTitle": "새 다리 개통"}})
+    assert own.upload and own.source is None
+
+    by_title = build_item({**base, "article": {**base["article"], "articleTitle": "광주)기대 뒤집은 KIA"}})
+    assert by_title.title.clean == "기대 뒤집은 KIA" and by_title.title.station == "광주"
+    assert by_title.item_type == ItemType.REPORT and not by_title.upload and by_title.source == "광주"
+
+    by_reporter = build_item(
+        {**base, "article": {**base["article"], "articleTitle": "제목", "reporterName": "이재원(광주)"}}
+    )
+    assert by_reporter.reporter == "이재원" and not by_reporter.upload
+
+    own_dept = build_item({**base, "article": {**base["article"], "articleTitle": "제목"}}, department="보도부")
+    assert own_dept.upload
+
+    by_dept = build_item({**base, "article": {**base["article"], "articleTitle": "제목"}}, department="광주")
+    assert not by_dept.upload
+
+    yeosu = build_item({**base, "article": {**base["article"], "articleTitle": "여수)엑스포 개막"}})
+    assert yeosu.source == "여수" and not yeosu.upload
+    yeosu_reporter = build_item(
+        {**base, "article": {**base["article"], "articleTitle": "제목", "reporterName": "홍길동(여수)"}}
+    )
+    assert not yeosu_reporter.upload
+
+
+def test_brief_is_never_uploaded():
+    raw = {"cueSheetItemOrderNumber": "7", "article": {"articleTitle": "단신", "articleContent": "단신입니다."}}
+    assert not build_item(raw).upload

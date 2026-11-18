@@ -28,7 +28,7 @@ def load(data_dir: Path) -> list[tuple[RundownItem, dict]]:
     for raw in items:
         order = int(str(raw["cueSheetItemOrderNumber"]))
         ex = extra.get(order, {})
-        out.append((build_item(raw, parse_duration(ex.get("plannedDuration"))), ex))
+        out.append((build_item(raw, parse_duration(ex.get("plannedDuration")), ex.get("department")), ex))
     return out
 
 
@@ -41,7 +41,13 @@ def fmt_s(sec: float | None) -> str:
 def report(rows: list[tuple[RundownItem, dict]]) -> str:
     md: list[str] = []
     n_r = sum(1 for it, _ in rows if it.item_type == ItemType.REPORT)
-    md.append(f"# 원고 파싱 결과\n\n아이템 {len(rows)}개, 리포트(업로드 대상) {n_r}개\n")
+    n_up = sum(1 for it, _ in rows if it.upload)
+    md.append(f"# 원고 파싱 결과\n\n아이템 {len(rows)}개, 리포트 {n_r}개, 업로드 대상 {n_up}개\n")
+    excluded = [it for it, _ in rows if it.item_type == ItemType.REPORT and not it.upload]
+    for it in excluded:
+        md.append(f"- 업로드 제외: {it.order}. {it.title.clean} — 출처 {it.source} ({it.source_reason})")
+    if excluded:
+        md.append("")
 
     md.append("## 아이템 형식 판별\n")
     md.append("| No | 큐시트 형식 | 판별 | 근거 | 예정 | 추정 | 제목 |")
@@ -61,7 +67,7 @@ def report(rows: list[tuple[RundownItem, dict]]) -> str:
 
     md.append("## 리포트 상세\n")
     for it, _ in rows:
-        if it.item_type != ItemType.REPORT or it.script is None:
+        if not it.upload or it.script is None:
             continue
         sc = it.script
         md.append(f"### {it.order}. {it.title.clean}\n")

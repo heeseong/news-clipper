@@ -36,6 +36,131 @@ Findings
   LOW_CONFIDENCE threshold needs negative examples (deliberately wrong scripts)
   before it can be set.
 
+## 2026-11-02 뉴스데스크 (golden set #2)
+
+Recording: 17:21, same format. It starts directly with the title (no preceding
+news). Different (male) anchor. 27 rundown items; the cue sheet print-out spans
+two pages. Reports: 2, 3, 5, 6 (6 is a 광주MBC package). Reference cuts were
+labelled frame by frame before running the aligner. Log-probs: 228 s for 17.4 min.
+
+First run (method as of golden set #1): 2 of 4 reports correct at both ends.
+
+| Problem | Cause | Fix |
+|---|---|---|
+| Report 2 start 3.4 s after the anchor cut | Anchor greeted viewers (53.9-56.4 s) before the lead; greeting is not in the script | No cut right before the lead: start in the silence before the lead. Reference corrected to that point |
+| Report 6 start 2.9 s early; report 5 end 3 s early | Anchor did not read the lead's first words as written; the aligner parked them in the 1.8 s silence before the lead (sentence score -2.9, not flagged) | If the first-character onset is inside a silence, move it to the silence end and flag `LEAD_ONSET_IN_SILENCE` |
+| Leads ~0.5 s early (also on #1) | ctc-segmentation pads sentence bounds (first char - 0.5 s) and lets the first sentence of a window absorb leftover audio | Use first/last character timestamps; align the previous item's last sentence as a guard |
+| `KIA` read as 케이아이에이 | Spelled letter by letter | Pronunciation dictionary (KIA -> 기아, …) |
+| `[영상] 홈런` kept as a sentence | 광주MBC script uses bracket directives | Parser strips `[...]` |
+
+After the fixes, both golden sets:
+
+| Broadcast | Report | Clip start | Clip end |
+|---|---|---|---|
+| 11-02 | 2 | lead silence (greeting skipped) | next anchor cut -½ frame |
+| 11-02 | 3, 5 | anchor cut +1 frame | next anchor cut -½ frame |
+| 11-02 | 6 | anchor cut +1 frame (flag: LEAD_ONSET_IN_SILENCE) | next anchor cut -½ frame |
+| 11-11 | 2, 3, 4, 6 | anchor cut +1 frame | next anchor cut -½ frame |
+
+16/16 boundaries match the reference. On 11-11, lead onsets are now within
+0.02 s of the speech start for 3 of 4 reports (+0.54 s for one).
+Caveat: 11-02 is no longer an unseen test; the fixes were made after seeing it.
+
+### Wrong-script test (detecting misalignment)
+
+Each 11-02 report window aligned with its own script vs. each 11-11 report script:
+
+| | Median sentence score | Sentences below -5 |
+|---|---|---|
+| Correct script (4) | -2.7 to -3.1 | 0-10% |
+| Wrong script (16) | -7.2 to -10.8 | 88-100% |
+
+The minimum sentence score does not separate them (a correct script reached
+-9.6 on a mis-transcribed interview line). Proposed rule: `LOW_CONFIDENCE`
+when the median is below -5 or more than 30% of sentences are below -5.
+
+## 2026-11-03 큐시트 + 2026-11-04 녹화본 (mismatched pair)
+
+The supplied recording (`…20261104…mp4`) was the 11-04 broadcast; its headlines
+and reports do not appear in the 11-03 cue sheet. Used as a real-world test of
+mismatch detection, with no tuning.
+
+| Item | Median score | Below -5 | Aligned / planned length | Flags |
+|---|---|---|---|---|
+| R2 | -4.30 | 32% | 0.34 | LOW_CONFIDENCE, DURATION_MISMATCH |
+| R3 | -8.11 | 100% | 0.21 | LOW_CONFIDENCE, DURATION_MISMATCH |
+| R4 | -7.50 | 96% | 0.48 | LOW_CONFIDENCE, DURATION_MISMATCH |
+| R5 | -8.25 | 100% | 0.40 | LOW_CONFIDENCE, DURATION_MISMATCH |
+| S18 | -3.62 | 0% | ~0.5 | DURATION_MISMATCH only (aligned over a recap card) |
+
+- All 4 reports were rejected; no wrong clip would reach upload.
+- The score rule alone was marginal for R2 (32% vs. the 30% limit) and missed
+  S18. The length ratio separates far better: correct reports on 11-02/11-11
+  are 0.98-1.04 of the planned length, mismatched ones 0.21-0.48.
+- Both checks together: 0 false accepts among reports here, 0 false rejects
+  among the 7 correct reports of 11-02/11-11 (short briefs at the very end of
+  a truncated recording are flagged, which is correct).
+
+## 2026-11-04 뉴스데스크 (golden set #3, blind)
+
+Same recording as the mismatched pair above, now with its own cue sheet.
+~110 s of another newscast, title, headlines, then a 65 s script-less bridge
+VCR (의대 타임라인 브릿지) before the first report. 5 reports (3, 4, 6, 7, 8);
+report 3 opens with an anchor greeting. Reference cuts labelled before running.
+
+Blind run (code unchanged since golden set #2): **8/10 boundaries correct**.
+Report 3 was placed over the headlines/bridge (172-228 s instead of 239-344 s)
+but flagged DURATION_MISMATCH, so no wrong clip would have been produced.
+
+Cause: when a window starts well before the item, ctc-segmentation crams the
+whole text into the audio that comes first (727 characters into 31 s). Starting
+the window at 230 s gives the right answer. Sentence scores did not show it;
+the duration check did. The headlines also repeat the lead's first sentence
+almost verbatim.
+
+Fix: when an alignment fails the plausibility checks (LOW_CONFIDENCE or
+DURATION_MISMATCH), retry with the window starting at each later scene cut and
+keep the first plausible result. Script-less items (title, bridge) also widen
+the next window by their planned length.
+
+After the fix: 10/10 on 11-04 (report 3 starts in the silence after the
+greeting, 238.993 s vs. 238.99 s), no change on 11-02 and 11-11, and the
+mismatched pair is still fully rejected (the retries did not produce a false
+accept).
+
+## 2026-11-05 뉴스데스크 (golden set #4, blind)
+
+~125 s of another newscast, title, headlines, studio wide shot, then the first
+report; the anchor's greeting starts over the wide shot. 5 reports (2, 3, 5, 6, 7).
+Reference labelled before running; code unchanged since golden set #3.
+
+Blind run: **9/10 boundaries correct, 1 wrong and not flagged.** Report 2's lead
+onset was exact (188.45 s), but the clip start snapped to the anchor cut 1.8 s
+earlier, which falls inside the greeting, so the clip would open with ~1.3 s of
+"…뉴스데스크입니다".
+
+Fix: after choosing the anchor cut, check whether the acoustic model hears speech
+(>= 4 syllables) between the cut and the silence before the lead; if so it is a
+greeting, so start in that silence instead. A loudness-only check was tried first
+and is not enough (music would count as speech).
+
+This also showed that **11-11 report 2 had the same greeting tail** ("…뉴스…습니다"
+between the cut and the lead); its reference had been set to the anchor cut before
+the greeting rule existed and was corrected to the silence before the lead.
+
+### Totals (after all fixes)
+
+| Golden set | Upload reports | Boundaries correct | First run |
+|---|---|---|---|
+| 11-11 | 4 | 8/8 | 8/8 (reference later corrected for a greeting tail) |
+| 11-02 | 3 (+1 other-station, excluded) | 6/6 | 2 of 4 reports wrong; fixed after seeing it |
+| 11-04 | 5 | 10/10 | blind 8/10, both errors flagged |
+| 11-05 | 5 | 10/10 | blind 9/10, 1 error not flagged (greeting) |
+| 11-03 cue + 11-04 video | 4 | all rejected | mismatch detection |
+
+Every broadcast so far opened its first report with an anchor greeting; that is
+the case that broke the rules most often.
+
 Reproduce (data under eval/data/ is not committed):
 
 ```bash

@@ -34,10 +34,13 @@ from .models import (
 MARKER_RE = re.compile(r"◀\s*([^◀▶]*?)\s*▶")
 # Directive prefixes glued to the start of a line, e.g. "통CG]", "반투명CG]".
 DIRECTIVE_PREFIX_RE = re.compile(r"^(?:[^\s\]◀]{0,6}CG\]\s*)+")
-DIRECTIVE_ONLY_RE = re.compile(r"^(?:\(?\s*(?:CG|화면전환|자막|그래픽)\s*\)?|/+|\+)$", re.IGNORECASE)
+DIRECTIVE_ONLY_RE = re.compile(
+    r"^(?:\(?\s*(?:CG|화면전환|자막|그래픽)\s*\)?|/+|\+|\[[^\]]*\]\s*\S{0,6})$", re.IGNORECASE
+)
 BARE_STANDUP_RE = re.compile(r"^(?:S/U|st-?up|스탠드업)\s*(.*)$", re.IGNORECASE)
 PAREN_RE = re.compile(r"[(（][^()（）]*[)）]")
 SUPER_RE = re.compile(r"\*[^*]*\*")
+BRACKET_RE = re.compile(r"\[[^\[\]]*\]")  # [영상] 홈런 style directives
 SLASH_RE = re.compile(r"(?<!\d)/+|/+(?!\d)")
 SIGNOFF_RE = re.compile(r"^(?:MBC|엠비씨)\s*뉴스\s*(?P<name>[가-힣]{2,4})\s*(?:기자\s*)?입니다\.?$", re.IGNORECASE)
 INTRO_RE = re.compile(r"기자가\s.*니다\.?$")
@@ -204,6 +207,7 @@ def clean_spoken(text: str) -> str:
     while prev != text:  # nested parentheses
         prev, text = text, PAREN_RE.sub(" ", text)
     text = SUPER_RE.sub(" ", text)
+    text = BRACKET_RE.sub(" ", text)
     text = SLASH_RE.sub(" ", text)
     text = re.sub(r"\s+([.,?!])", r"\1", text)
     text = re.sub(r"\s+", " ", text)
