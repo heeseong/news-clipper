@@ -104,6 +104,23 @@ def refine_onset(t: float, silences: list[tuple[float, float]]) -> tuple[float, 
     return t, False
 
 
+SPEECH_MIN = 4  # recognised syllables that count as speech (music yields few or none)
+
+
+def syllables_between(t0: float, t1: float, lpz, frame_sec: float, offset: float, vocab_list, blank: int) -> int:
+    """Number of syllables the acoustic model hears in [t0, t1] (greedy CTC decode)."""
+    if t1 <= t0:
+        return 0
+    f0, f1 = max(0, int((t0 - offset) / frame_sec)), min(len(lpz), int((t1 - offset) / frame_sec))
+    ids = lpz[f0:f1].argmax(axis=1)
+    n, prev = 0, None
+    for k in ids:
+        if k != blank and k != prev and vocab_list[k] != "|":
+            n += 1
+        prev = k
+    return n
+
+
 def snap(t: float, cuts: np.ndarray, lo: float, hi: float, prefer: str) -> tuple[float, str]:
     cand = cuts[(cuts >= t + lo) & (cuts <= t + hi)]
     if len(cand) == 0:
@@ -207,12 +224,19 @@ def main() -> None:
             flags.append("LOW_CONFIDENCE")
         end, end_score = segs[signoff][4], segs[signoff][2]  # offset of the last character
         clip_start, s_src = snap(lead_start, cuts, *START_SNAP, prefer="before")
+        # The silence right before the lead, if any.
+        gap = [(a, b) for a, b in silences if lead_start - 1.5 <= b <= lead_start + 0.7]
+        if s_src == "scene" and gap and (
+            syllables_between(clip_start, gap[-1][0], lpz, frame_sec, offset, vocab_list, blank) >= SPEECH_MIN
+        ):
+            # The anchor said something else between the cut and the lead (a greeting,
+            # possibly started over the studio wide shot): do not include it.
+            s_src = "align"
         if s_src == "scene":
             clip_start += 1.0 / args.fps  # the detected cut frame is a one-frame blend: skip it
         else:
-            # No cut right before the lead (e.g. the anchor greeted viewers first, or the
-            # lead is read over another shot): start in the silence just before the lead.
-            gap = [(a, b) for a, b in silences if lead_start - 1.5 <= b <= lead_start + 0.7]
+            # No usable cut right before the lead (greeting, or the lead is read over
+            # another shot): start in the silence just before the lead.
             if gap:
                 a, b = gap[-1]
                 clip_start, s_src = max(a, b - 0.5), "silence"

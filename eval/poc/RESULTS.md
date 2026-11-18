@@ -128,14 +128,38 @@ greeting, 238.993 s vs. 238.99 s), no change on 11-02 and 11-11, and the
 mismatched pair is still fully rejected (the retries did not produce a false
 accept).
 
+## 2026-11-05 뉴스데스크 (golden set #4, blind)
+
+~125 s of another newscast, title, headlines, studio wide shot, then the first
+report; the anchor's greeting starts over the wide shot. 5 reports (2, 3, 5, 6, 7).
+Reference labelled before running; code unchanged since golden set #3.
+
+Blind run: **9/10 boundaries correct, 1 wrong and not flagged.** Report 2's lead
+onset was exact (188.45 s), but the clip start snapped to the anchor cut 1.8 s
+earlier, which falls inside the greeting, so the clip would open with ~1.3 s of
+"…뉴스데스크입니다".
+
+Fix: after choosing the anchor cut, check whether the acoustic model hears speech
+(>= 4 syllables) between the cut and the silence before the lead; if so it is a
+greeting, so start in that silence instead. A loudness-only check was tried first
+and is not enough (music would count as speech).
+
+This also showed that **11-11 report 2 had the same greeting tail** ("…뉴스…습니다"
+between the cut and the lead); its reference had been set to the anchor cut before
+the greeting rule existed and was corrected to the silence before the lead.
+
 ### Totals (after all fixes)
 
-| Golden set | Reports | Boundaries correct | Note |
+| Golden set | Upload reports | Boundaries correct | First run |
 |---|---|---|---|
-| 11-11 | 4 | 8/8 | blind 8/8 at first run |
-| 11-02 | 3 (+1 other-station, excluded) | 6/6 | fixes made after seeing it |
-| 11-04 | 5 | 10/10 | blind 8/10, 2 flagged; fixed after |
+| 11-11 | 4 | 8/8 | 8/8 (reference later corrected for a greeting tail) |
+| 11-02 | 3 (+1 other-station, excluded) | 6/6 | 2 of 4 reports wrong; fixed after seeing it |
+| 11-04 | 5 | 10/10 | blind 8/10, both errors flagged |
+| 11-05 | 5 | 10/10 | blind 9/10, 1 error not flagged (greeting) |
 | 11-03 cue + 11-04 video | 4 | all rejected | mismatch detection |
+
+Every broadcast so far opened its first report with an anchor greeting; that is
+the case that broke the rules most often.
 
 Reproduce (data under eval/data/ is not committed):
 
