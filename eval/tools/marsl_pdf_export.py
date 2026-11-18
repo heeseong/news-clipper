@@ -198,7 +198,8 @@ def export(cuesheet_pdf: Path, scripts_pdf: Path, out_dir: Path) -> None:
                     "articleCategoryName": None,
                     "broadCastProgramName": cue["programName"],
                     "memo": script["memo"] or None,
-                    "reporterName": script["reporter"] or item["reporter"],
+                    # The cue sheet shows other stations' reporters as 이름(광주).
+                    "reporterName": item["reporter"] or script["reporter"],
                     "reporterEmailAddress": None,
                     "inputDateTime": script["releasedAt"],
                     "updateDatetime": script["releasedAt"],

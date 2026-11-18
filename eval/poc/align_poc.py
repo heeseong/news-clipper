@@ -42,7 +42,8 @@ def load_items(data_dir: Path):
     items = []
     for r in raw:
         order = int(str(r["cueSheetItemOrderNumber"]))
-        items.append(build_item(r, parse_duration(extra.get(order, {}).get("plannedDuration"))))
+        ex = extra.get(order, {})
+        items.append(build_item(r, parse_duration(ex.get("plannedDuration")), ex.get("department")))
     return items
 
 
@@ -145,7 +146,7 @@ def main() -> None:
         item_starts.append((it.order, onset))
         print(f"[{it.order:2d} {it.item_type.value}] {segs[0][3]:7.2f} - {segs[-1][4]:7.2f}  "
               f"min score {min(s[2] for s in segs):6.2f}  {it.title.clean[:30]}")
-        if it.item_type != ItemType.REPORT:
+        if not it.upload:  # briefs and other stations' reports: alignment anchors only
             continue
         signoff = next((i for i in range(len(sents) - 1, -1, -1) if sents[i].kind == SentenceKind.SIGNOFF), len(sents) - 1)
         lead_start, lead_score = segs[0][3], segs[0][2]  # onset of the first character

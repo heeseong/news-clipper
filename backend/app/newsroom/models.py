@@ -70,6 +70,7 @@ class Title(BaseModel):
     raw: str
     clean: str  # report markers removed
     series: str | None = None  # e.g. "기획4" from "기획4]…"
+    station: str | None = None  # e.g. "광주" from "광주)…" (item from another station)
 
 
 class RundownItem(BaseModel):
@@ -78,6 +79,9 @@ class RundownItem(BaseModel):
     reporter: str | None
     item_type: ItemType
     type_reason: str  # why item_type was chosen (for review / debugging)
+    source: str | None = None  # other station that produced the item, e.g. "광주" (None = own)
+    source_reason: str | None = None
+    upload: bool = False  # True only for own-station reports (R)
     planned_seconds: int | None = None  # None when the source has no duration
     estimated_seconds: float | None = None  # reading-time estimate from the script
     remark: str | None = None

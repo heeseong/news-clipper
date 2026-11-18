@@ -2,11 +2,12 @@
 
 > 종합뉴스 방송 녹화본을 **큐시트·원고(MARS-L)**에 맞춰 리포트 단위로 자동 분할하고, 제목·설명·썸네일을 만든 뒤 검수를 거쳐 YouTube 등 채널에 예약 업로드하는 사내 웹 애플리케이션.
 
-- 문서 버전: v0.5 (2026-11-18)
+- 문서 버전: v0.6 (2026-11-18)
 - 변경 이력
   - v0.1: STT + LLM 기반 경계 탐지
   - v0.2: **큐시트·원고 + 원고-오디오 정렬 기반으로 전환** (STT는 보조 수단), 업로드 대상을 **리포트(R)로 한정**
   - v0.3: MARS-L 외부 API 명세 반영(3.1~3.2, 5.4). 형식(R/S)·예정 길이가 API에 없어 대안 규칙 추가
+  - v0.6: 다른 방송사(광주MBC) 리포트는 업로드 제외 (1.4, 5.4)
   - v0.5: 2차 검증(11-02) 반영: 인사말 처리, 리드 시작이 무음에 걸릴 때 보정, 문자 단위 시각 사용, 발음 사전, 오정렬 판정 기준(5.5)
   - v0.4: 정렬 PoC 결과 반영(5.3, 5.5, 5.6). 리포트 끝은 다음 아이템의 앵커 샷 컷 기준, 컷 임계값 0.1, 프레임 단위 렌더 규칙 (eval/poc/RESULTS.md)
 - 상태: 초안 (16장 미결 사항 확인 필요)
@@ -33,7 +34,8 @@
 | 안정적인 배포 | 업로드 실패 시 자동 재시도, 최종 성공률 99% 이상 |
 
 ### 1.4 범위
-- **업로드 대상: 큐시트 형식 `R`(리포트) 아이템만**
+- **업로드 대상: 큐시트 형식 `R`(리포트) 중 자사 제작 리포트만**
+- 제외: 다른 방송사(광주MBC 등)가 만든 리포트. 우리 앵커가 리드를 읽더라도 업로드하지 않는다
 - 제외: 단신(`S`), 타이틀/주요뉴스(헤드라인)/클로징/CM 등 형식이 비어 있는 아이템. 단, 이 아이템들의 원고와 길이는 **정렬의 기준점**으로 사용한다.
 
 ### 1.5 범위 밖 (v1)
@@ -106,6 +108,11 @@
 | V(송출 채널), A(오디오 소스) | 없음 | 필요 없음. 아이템 경계의 화면 컷은 영상에서 직접 검출 |
 | 원고 왼쪽 칸 메모(썸네일, 상단, 수퍼) | 불명확 | `memo` 필드 또는 `articleContent` 안의 특정 표기일 가능성. 실제 응답으로 확인 필요 |
 
+- **출처 판별 규칙** (하나라도 해당하면 다른 방송사 리포트 → 업로드 제외, 정렬 기준점으로는 사용):
+  - 제목 앞머리가 `방송사명)` 형태: `광주)기대 뒤집은 KIA…`
+  - 기자 표기의 괄호가 자사 부서가 아님: `이재원(광주)` (자사는 `(보도부)`, `(보도국)` 등)
+  - 004 API로 매칭된 기사의 `sameChannel=false` 또는 `originChannelName`이 자사가 아님 (실제 API 확인 후 적용)
+  - 제외할 방송사 목록(기본 `광주`)은 프로그램 프로필에서 설정한다. 판별 결과와 근거를 저장하고 검수 화면에 보여준다
 - **형식 판별 규칙** (우선순위): `remark`/`cueSheetItemContent`의 명시적 값 → 원고 구조(`◀리포트▶` + 사인오프) → 004 매칭. 판별 결과와 근거를 저장하고, 검수 화면에서 사람이 바꿀 수 있게 한다.
 - **예정 길이**는 정렬의 대략 위치 추정(5-1)에만 쓰인다. 없어도 원고 낭독 시간 추정치로 대체할 수 있으므로 필수는 아니다.
 
@@ -432,7 +439,7 @@ storage/jobs/{job_id}/
 | Job | id, program_id, broadcast_date, status, current_step, error, source_path, source_hash, duration, fps, width, height, created_by |
 | JobStep | id, job_id, step, status, started_at, finished_at, attempts, error |
 | Rundown | id, job_id, newsroom_rundown_id, edition(판 수), confirmed_at, fetched_at, raw(JSONB) |
-| RundownItem | id, rundown_id, item_no, type(R/S/null), title, reporter, planned_duration, cumulative, video_channel(V), audio_source(A), note, parsed_script(JSONB), parse_warnings[] |
+| RundownItem | id, rundown_id, item_no, type(R/S/null), source(타 방송사명 또는 null), source_reason, upload(bool), title, reporter, planned_duration, cumulative, video_channel(V), audio_source(A), note, parsed_script(JSONB), parse_warnings[] |
 | AlignedSentence | id, rundown_item_id, seq, section(lead/report), kind, text, start_sec, end_sec, score |
 | Clip | id, job_id, rundown_item_id, start_sec, end_sec, start_snap, end_snap, confidence, flags[], status, render_path, locked_by, locked_at |
 | ClipMetadata | clip_id, title, title_candidates[], description, tags[], hashtags[], thumbnail_text, privacy, publish_at |
@@ -542,6 +549,7 @@ storage/jobs/{job_id}/
 | 2026-11-18 | 리포트 클립은 앵커 리드 포함, 모든 클립은 검수 후 업로드 |
 | 2026-11-18 | STT 대신 큐시트·원고 + 원고-오디오 강제 정렬. STT는 선택적 보조 수단 |
 | 2026-11-18 | 업로드 대상은 리포트(R)만. 단신·헤드라인·타이틀·클로징 제외 |
+| 2026-11-18 | 다른 방송사(광주MBC) 리포트는 업로드 제외 |
 
 ## 16. 미결 사항 (확인 필요)
 1. **MARS-L 실제 응답 확인** (명세서는 받음, 3.1 참고)
