@@ -31,6 +31,8 @@ from app.newsroom.rundown import build_item, parse_duration  # noqa: E402
 
 WINDOW_SLACK = 1.5  # window = planned duration * slack + margin
 WINDOW_MARGIN = 60.0
+# Recordings can start with unrelated material (another newscast) before the title.
+PREAMBLE_ALLOWANCE = 300.0
 START_SNAP = (-3.0, 0.5)  # cut search range around lead start
 END_SNAP = (-0.3, 2.5)  # cut search range around sign-off end
 END_PAD = 0.4
@@ -65,7 +67,7 @@ def to_tokens(text: str, vocab: set[str]) -> str:
     return "".join(ch for ch in spoken if ch in vocab)
 
 
-def align_window(lpz, frame_sec, vocab_list, blank, texts):
+def align_window(lpz, frame_sec, vocab_list, blank, texts, full_search: bool = False):
     """Return (start, end, score, onset, offset) per text.
 
     start/end are ctc-segmentation's padded utterance bounds (up to 0.5 s around
@@ -76,7 +78,9 @@ def align_window(lpz, frame_sec, vocab_list, blank, texts):
     cfg.index_duration = frame_sec
     cfg.blank = blank
     cfg.space = "|"
-    cfg.min_window_size = 8000
+    # ctc-segmentation searches a band around the "evenly spread" diagonal. With a long
+    # unrelated stretch before the text (first item), widen it to the whole window.
+    cfg.min_window_size = max(8000, lpz.shape[0]) if full_search else 8000
     gt_mat, utt_begin = prepare_text(cfg, texts)
     timings, char_probs, _ = ctc_segmentation(cfg, lpz, gt_mat)
     segs = determine_utterance_segments(cfg, utt_begin, char_probs, timings, texts)
@@ -135,8 +139,12 @@ def main() -> None:
     guard: tuple[str, float] | None = None  # previous item's last sentence (tokens, onset)
     items = load_items(d)
     planned_by_order = {it.order: it.planned_seconds for it in items}
+    skipped = 0.0  # planned seconds of script-less items since the last aligned one
     for it in items:
         if it.script is None:
+            # Items without a script (title, headlines, bridge VCR) still take air time:
+            # widen the next window by their planned length.
+            skipped += it.planned_seconds or 0
             continue
         sents = [s for s in it.script.sentences if to_tokens(s.text, vocab)]
         texts = [to_tokens(s.text, vocab) for s in sents]
@@ -144,17 +152,42 @@ def main() -> None:
         # Start the window at the previous item's last sentence and align that sentence
         # too, so this item's first sentence has an explicit left neighbour.
         w0 = max(offset, guard[1] - 1.0) if guard else max(offset, cursor)
-        w1 = w0 + dur * WINDOW_SLACK + WINDOW_MARGIN
-        f0, f1 = int((w0 - offset) / frame_sec), min(len(lpz), int((w1 - offset) / frame_sec))
-        window_texts = ([guard[0]] if guard else []) + texts
+        extra = skipped + (PREAMBLE_ALLOWANCE if guard is None else 0.0)
+        w1 = w0 + (dur + extra) * WINDOW_SLACK + WINDOW_MARGIN
+        skipped = 0.0
+        def attempt(a0: float, a1: float, with_guard: bool):
+            f0, f1 = int((a0 - offset) / frame_sec), min(len(lpz), int((a1 - offset) / frame_sec))
+            wt = ([guard[0]] if (guard and with_guard) else []) + texts
+            out = align_window(lpz[f0:f1], frame_sec, vocab_list, blank, wt, full_search=guard is None)
+            if guard and with_guard:
+                out = out[1:]
+            return [(a0 + a, a0 + b, sc, a0 + on, a0 + off) for a, b, sc, on, off in out]
+
+        def plausible(sg) -> bool:
+            return not confidence([x[2] for x in sg])[2] and not duration_off(sg[-1][4] - sg[0][3], it.planned_seconds)
+
         try:
-            segs = align_window(lpz[f0:f1], frame_sec, vocab_list, blank, window_texts)
+            segs = attempt(w0, w1, with_guard=True)
         except AssertionError:  # less audio left than text: item not in the recording
             print(f"[{it.order:2d} {it.item_type.value}] NOT_FOUND (recording ends)  {it.title.clean[:30]}")
             continue
-        if guard:
-            segs = segs[1:]
-        segs = [(w0 + a, w0 + b, sc, w0 + on, w0 + off) for a, b, sc, on, off in segs]
+        if not plausible(segs):
+            # ctc-segmentation crams the text into whatever audio comes first when the window
+            # starts well before the item (preamble, headlines, bridge VCR). Retry with the
+            # window starting at each later scene cut; keep the first plausible alignment.
+            last = -1e9
+            for c in cuts[(cuts > w0) & (cuts < w1 - dur)]:
+                if c - last < 3.0:
+                    continue
+                last = c
+                try:
+                    cand = attempt(c - 0.5, c + dur * WINDOW_SLACK + WINDOW_MARGIN, with_guard=False)
+                except AssertionError:
+                    break
+                if plausible(cand):
+                    print(f"[{it.order:2d}] retried from cut {c:.2f}")
+                    segs = cand
+                    break
         cursor = segs[-1][4]
         guard = (texts[-1], segs[-1][3])
         onset, _ = refine_onset(segs[0][3], silences)

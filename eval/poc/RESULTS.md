@@ -101,6 +101,42 @@ mismatch detection, with no tuning.
   among the 7 correct reports of 11-02/11-11 (short briefs at the very end of
   a truncated recording are flagged, which is correct).
 
+## 2026-11-04 뉴스데스크 (golden set #3, blind)
+
+Same recording as the mismatched pair above, now with its own cue sheet.
+~110 s of another newscast, title, headlines, then a 65 s script-less bridge
+VCR (의대 타임라인 브릿지) before the first report. 5 reports (3, 4, 6, 7, 8);
+report 3 opens with an anchor greeting. Reference cuts labelled before running.
+
+Blind run (code unchanged since golden set #2): **8/10 boundaries correct**.
+Report 3 was placed over the headlines/bridge (172-228 s instead of 239-344 s)
+but flagged DURATION_MISMATCH, so no wrong clip would have been produced.
+
+Cause: when a window starts well before the item, ctc-segmentation crams the
+whole text into the audio that comes first (727 characters into 31 s). Starting
+the window at 230 s gives the right answer. Sentence scores did not show it;
+the duration check did. The headlines also repeat the lead's first sentence
+almost verbatim.
+
+Fix: when an alignment fails the plausibility checks (LOW_CONFIDENCE or
+DURATION_MISMATCH), retry with the window starting at each later scene cut and
+keep the first plausible result. Script-less items (title, bridge) also widen
+the next window by their planned length.
+
+After the fix: 10/10 on 11-04 (report 3 starts in the silence after the
+greeting, 238.993 s vs. 238.99 s), no change on 11-02 and 11-11, and the
+mismatched pair is still fully rejected (the retries did not produce a false
+accept).
+
+### Totals (after all fixes)
+
+| Golden set | Reports | Boundaries correct | Note |
+|---|---|---|---|
+| 11-11 | 4 | 8/8 | blind 8/8 at first run |
+| 11-02 | 3 (+1 other-station, excluded) | 6/6 | fixes made after seeing it |
+| 11-04 | 5 | 10/10 | blind 8/10, 2 flagged; fixed after |
+| 11-03 cue + 11-04 video | 4 | all rejected | mismatch detection |
+
 Reproduce (data under eval/data/ is not committed):
 
 ```bash
