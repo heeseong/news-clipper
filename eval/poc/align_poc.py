@@ -36,6 +36,11 @@ END_SNAP = (-0.3, 2.5)  # cut search range around sign-off end
 END_PAD = 0.4
 LOW_SCORE = -5.0  # spec 5-3-1: LOW_CONFIDENCE if median < -5 or > 30% of sentences below -5
 LOW_SHARE = 0.30
+DURATION_TOLERANCE = 0.20  # spec 5-4: DURATION_MISMATCH if aligned length is off by more than ±20%
+
+
+def duration_off(aligned: float, planned: float | None) -> bool:
+    return bool(planned) and abs(aligned / planned - 1) > DURATION_TOLERANCE
 
 
 def confidence(scores: list[float]) -> tuple[float, float, bool]:
@@ -128,7 +133,9 @@ def main() -> None:
     results = []
     item_starts: list[tuple[int, float]] = []  # (order, first sentence onset) for every aligned item
     guard: tuple[str, float] | None = None  # previous item's last sentence (tokens, onset)
-    for it in load_items(d):
+    items = load_items(d)
+    planned_by_order = {it.order: it.planned_seconds for it in items}
+    for it in items:
         if it.script is None:
             continue
         sents = [s for s in it.script.sentences if to_tokens(s.text, vocab)]
@@ -154,7 +161,9 @@ def main() -> None:
         item_starts.append((it.order, onset))
         print(f"[{it.order:2d} {it.item_type.value}] {segs[0][3]:7.2f} - {segs[-1][4]:7.2f}  "
               f"median {confidence([x[2] for x in segs])[0]:6.2f} low {confidence([x[2] for x in segs])[1]:4.0%}"
-              f"{'  LOW_CONFIDENCE' if confidence([x[2] for x in segs])[2] else ''}  {it.title.clean[:30]}")
+              f"{'  LOW_CONFIDENCE' if confidence([x[2] for x in segs])[2] else ''}"
+              f"{'  DURATION_MISMATCH' if duration_off(segs[-1][4] - segs[0][3], it.planned_seconds) else ''}"
+              f"  {it.title.clean[:30]}")
         if not it.upload:  # briefs and other stations' reports: alignment anchors only
             continue
         signoff = next((i for i in range(len(sents) - 1, -1, -1) if sents[i].kind == SentenceKind.SIGNOFF), len(sents) - 1)
@@ -199,6 +208,9 @@ def main() -> None:
             if src == "scene" and r["signoff_end"] - 3.0 <= cut <= r["signoff_end"] + 3.0:
                 # stop before the blended cut frame
                 r["clip_end"], r["end_snapped_to"] = round(cut - 0.5 / args.fps, 3), "next_item_cut"
+        planned = planned_by_order.get(r["order"])
+        if duration_off(r["clip_end"] - r["clip_start"], planned):
+            r["flags"].append("DURATION_MISMATCH")
         if r["order"] in gt:
             g = gt[r["order"]]
             def diff(a, b):

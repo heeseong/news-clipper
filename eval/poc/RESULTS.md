@@ -79,6 +79,28 @@ The minimum sentence score does not separate them (a correct script reached
 -9.6 on a mis-transcribed interview line). Proposed rule: `LOW_CONFIDENCE`
 when the median is below -5 or more than 30% of sentences are below -5.
 
+## 2026-11-03 큐시트 + 2026-11-04 녹화본 (mismatched pair)
+
+The supplied recording (`…20261104…mp4`) was the 11-04 broadcast; its headlines
+and reports do not appear in the 11-03 cue sheet. Used as a real-world test of
+mismatch detection, with no tuning.
+
+| Item | Median score | Below -5 | Aligned / planned length | Flags |
+|---|---|---|---|---|
+| R2 | -4.30 | 32% | 0.34 | LOW_CONFIDENCE, DURATION_MISMATCH |
+| R3 | -8.11 | 100% | 0.21 | LOW_CONFIDENCE, DURATION_MISMATCH |
+| R4 | -7.50 | 96% | 0.48 | LOW_CONFIDENCE, DURATION_MISMATCH |
+| R5 | -8.25 | 100% | 0.40 | LOW_CONFIDENCE, DURATION_MISMATCH |
+| S18 | -3.62 | 0% | ~0.5 | DURATION_MISMATCH only (aligned over a recap card) |
+
+- All 4 reports were rejected; no wrong clip would reach upload.
+- The score rule alone was marginal for R2 (32% vs. the 30% limit) and missed
+  S18. The length ratio separates far better: correct reports on 11-02/11-11
+  are 0.98-1.04 of the planned length, mismatched ones 0.21-0.48.
+- Both checks together: 0 false accepts among reports here, 0 false rejects
+  among the 7 correct reports of 11-02/11-11 (short briefs at the very end of
+  a truncated recording are flagged, which is correct).
+
 Reproduce (data under eval/data/ is not committed):
 
 ```bash
