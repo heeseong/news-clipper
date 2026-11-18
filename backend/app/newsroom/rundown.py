@@ -16,7 +16,7 @@ SENTENCE_PAUSE = 0.35  # seconds between sentences
 REPORT_TYPE_WORDS = ("리포트",)
 # Items produced by these stations are not uploaded (still used as alignment anchors).
 # Per-program setting later (ProgramProfile).
-EXCLUDED_SOURCES = ("광주",)
+EXCLUDED_SOURCES = ("광주", "여수")
 # Department names that mean "our own newsroom" in reporter labels such as 홍길동(보도부).
 OWN_DEPARTMENTS = ("보도부", "보도국", "취재부", "편집부", "영상취재부")
 

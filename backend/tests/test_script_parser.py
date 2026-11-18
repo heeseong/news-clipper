@@ -218,6 +218,13 @@ def test_other_station_report_is_not_uploaded():
     by_dept = build_item({**base, "article": {**base["article"], "articleTitle": "제목"}}, department="광주")
     assert not by_dept.upload
 
+    yeosu = build_item({**base, "article": {**base["article"], "articleTitle": "여수)엑스포 개막"}})
+    assert yeosu.source == "여수" and not yeosu.upload
+    yeosu_reporter = build_item(
+        {**base, "article": {**base["article"], "articleTitle": "제목", "reporterName": "홍길동(여수)"}}
+    )
+    assert not yeosu_reporter.upload
+
 
 def test_brief_is_never_uploaded():
     raw = {"cueSheetItemOrderNumber": "7", "article": {"articleTitle": "단신", "articleContent": "단신입니다."}}
