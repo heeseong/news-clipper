@@ -36,6 +36,49 @@ Findings
   LOW_CONFIDENCE threshold needs negative examples (deliberately wrong scripts)
   before it can be set.
 
+## 2026-11-02 뉴스데스크 (golden set #2)
+
+Recording: 17:21, same format. It starts directly with the title (no preceding
+news). Different (male) anchor. 27 rundown items; the cue sheet print-out spans
+two pages. Reports: 2, 3, 5, 6 (6 is a 광주MBC package). Reference cuts were
+labelled frame by frame before running the aligner. Log-probs: 228 s for 17.4 min.
+
+First run (method as of golden set #1): 2 of 4 reports correct at both ends.
+
+| Problem | Cause | Fix |
+|---|---|---|
+| Report 2 start 3.4 s after the anchor cut | Anchor greeted viewers (53.9-56.4 s) before the lead; greeting is not in the script | No cut right before the lead: start in the silence before the lead. Reference corrected to that point |
+| Report 6 start 2.9 s early; report 5 end 3 s early | Anchor did not read the lead's first words as written; the aligner parked them in the 1.8 s silence before the lead (sentence score -2.9, not flagged) | If the first-character onset is inside a silence, move it to the silence end and flag `LEAD_ONSET_IN_SILENCE` |
+| Leads ~0.5 s early (also on #1) | ctc-segmentation pads sentence bounds (first char - 0.5 s) and lets the first sentence of a window absorb leftover audio | Use first/last character timestamps; align the previous item's last sentence as a guard |
+| `KIA` read as 케이아이에이 | Spelled letter by letter | Pronunciation dictionary (KIA -> 기아, …) |
+| `[영상] 홈런` kept as a sentence | 광주MBC script uses bracket directives | Parser strips `[...]` |
+
+After the fixes, both golden sets:
+
+| Broadcast | Report | Clip start | Clip end |
+|---|---|---|---|
+| 11-02 | 2 | lead silence (greeting skipped) | next anchor cut -½ frame |
+| 11-02 | 3, 5 | anchor cut +1 frame | next anchor cut -½ frame |
+| 11-02 | 6 | anchor cut +1 frame (flag: LEAD_ONSET_IN_SILENCE) | next anchor cut -½ frame |
+| 11-11 | 2, 3, 4, 6 | anchor cut +1 frame | next anchor cut -½ frame |
+
+16/16 boundaries match the reference. On 11-11, lead onsets are now within
+0.02 s of the speech start for 3 of 4 reports (+0.54 s for one).
+Caveat: 11-02 is no longer an unseen test; the fixes were made after seeing it.
+
+### Wrong-script test (detecting misalignment)
+
+Each 11-02 report window aligned with its own script vs. each 11-11 report script:
+
+| | Median sentence score | Sentences below -5 |
+|---|---|---|
+| Correct script (4) | -2.7 to -3.1 | 0-10% |
+| Wrong script (16) | -7.2 to -10.8 | 88-100% |
+
+The minimum sentence score does not separate them (a correct script reached
+-9.6 on a mis-transcribed interview line). Proposed rule: `LOW_CONFIDENCE`
+when the median is below -5 or more than 30% of sentences are below -5.
+
 Reproduce (data under eval/data/ is not committed):
 
 ```bash

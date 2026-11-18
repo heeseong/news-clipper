@@ -30,6 +30,14 @@ _LETTERS = {
     "Q": "큐", "R": "알", "S": "에스", "T": "티", "U": "유", "V": "브이", "W": "더블유", "X": "엑스",
     "Y": "와이", "Z": "지",
 }
+# Words read differently from their spelling. Extend per program as needed.
+PRONUNCIATIONS = {
+    "KIA": "기아",
+    "KTX": "케이티엑스",
+    "SRT": "에스알티",
+    "FA": "에프에이",
+}
+
 _SYMBOLS = {"%": "퍼센트", "~": "에서", "→": "에서", "℃": "도", "㎡": "제곱미터", "㎞": "킬로미터", "&": "앤"}
 
 
@@ -101,6 +109,8 @@ def spell_latin(text: str) -> str:
 
 def to_spoken_hangul(text: str) -> str:
     """Hangul syllables and single spaces only."""
+    for word, reading in PRONUNCIATIONS.items():
+        text = re.sub(rf"(?<![A-Za-z]){word}(?![A-Za-z])", reading, text)
     for sym, word in _SYMBOLS.items():
         text = text.replace(sym, word)
     text = spell_numbers(text)

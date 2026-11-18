@@ -123,6 +123,11 @@ def test_warnings():
     assert any(w.startswith("UNKNOWN_MARKER") for w in sc.warnings)
 
 
+def test_bracket_directives_removed():
+    sc = parse_script("◀ 리포트 ▶\n\n[영상] 홈런\n예상을 뒤집은 건 장타력이었습니다.\n\nMBC뉴스 홍길동입니다.")
+    assert [s.text for s in sc.sentences][0] == "예상을 뒤집은 건 장타력이었습니다."
+
+
 def test_clean_spoken_keeps_number_slashes():
     assert clean_spoken("비율은 1/2입니다.//") == "비율은 1/2입니다."
     assert clean_spoken("*목포여자고등학교* 개교 (CG)") == "개교"
