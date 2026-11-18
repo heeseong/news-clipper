@@ -34,6 +34,14 @@ WINDOW_MARGIN = 60.0
 START_SNAP = (-3.0, 0.5)  # cut search range around lead start
 END_SNAP = (-0.3, 2.5)  # cut search range around sign-off end
 END_PAD = 0.4
+LOW_SCORE = -5.0  # spec 5-3-1: LOW_CONFIDENCE if median < -5 or > 30% of sentences below -5
+LOW_SHARE = 0.30
+
+
+def confidence(scores: list[float]) -> tuple[float, float, bool]:
+    arr = np.array(scores)
+    median, share = float(np.median(arr)), float((arr < LOW_SCORE).mean())
+    return median, share, (median < LOW_SCORE or share > LOW_SHARE)
 
 
 def load_items(data_dir: Path):
@@ -145,13 +153,16 @@ def main() -> None:
         onset, _ = refine_onset(segs[0][3], silences)
         item_starts.append((it.order, onset))
         print(f"[{it.order:2d} {it.item_type.value}] {segs[0][3]:7.2f} - {segs[-1][4]:7.2f}  "
-              f"min score {min(s[2] for s in segs):6.2f}  {it.title.clean[:30]}")
+              f"median {confidence([x[2] for x in segs])[0]:6.2f} low {confidence([x[2] for x in segs])[1]:4.0%}"
+              f"{'  LOW_CONFIDENCE' if confidence([x[2] for x in segs])[2] else ''}  {it.title.clean[:30]}")
         if not it.upload:  # briefs and other stations' reports: alignment anchors only
             continue
         signoff = next((i for i in range(len(sents) - 1, -1, -1) if sents[i].kind == SentenceKind.SIGNOFF), len(sents) - 1)
         lead_start, lead_score = segs[0][3], segs[0][2]  # onset of the first character
         lead_start, moved = refine_onset(lead_start, silences)
         flags = ["LEAD_ONSET_IN_SILENCE"] if moved else []
+        if confidence([x[2] for x in segs])[2]:
+            flags.append("LOW_CONFIDENCE")
         end, end_score = segs[signoff][4], segs[signoff][2]  # offset of the last character
         clip_start, s_src = snap(lead_start, cuts, *START_SNAP, prefer="before")
         if s_src == "scene":
