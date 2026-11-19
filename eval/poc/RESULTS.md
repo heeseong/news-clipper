@@ -161,6 +161,14 @@ the greeting rule existed and was corrected to the silence before the lead.
 Every broadcast so far opened its first report with an anchor greeting; that is
 the case that broke the rules most often.
 
+## Real MARS-L API scripts (2026-11-04)
+
+The 11-04 golden set was re-run with the real IF_MARSL_003 response instead of
+scripts converted from the PDF print-out (no title/bridge items in the API, so
+item numbers shift by 2). Planned lengths came from the API
+(`ancMentCttTime + artclCttTime + artclExtTime`, which matches the print-out's
+시간 column for 22/22 items). Result: 10/10 boundaries, identical to the PDF run.
+
 Reproduce (data under eval/data/ is not committed):
 
 ```bash

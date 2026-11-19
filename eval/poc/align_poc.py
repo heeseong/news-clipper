@@ -53,7 +53,8 @@ def confidence(scores: list[float]) -> tuple[float, float, bool]:
 
 def load_items(data_dir: Path):
     raw = json.loads((data_dir / "items.json").read_text())["data"]
-    extra = {e["order"]: e for e in json.loads((data_dir / "pdf_extra.json").read_text())}
+    extra_path = data_dir / "pdf_extra.json"  # optional: print-out fields (API data has its own times)
+    extra = {e["order"]: e for e in json.loads(extra_path.read_text())} if extra_path.exists() else {}
     items = []
     for r in raw:
         order = int(str(r["cueSheetItemOrderNumber"]))

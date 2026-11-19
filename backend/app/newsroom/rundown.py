@@ -14,13 +14,14 @@ ANCHOR_RATE = 5.7
 REPORT_RATE = 5.7
 SENTENCE_PAUSE = 0.35  # seconds between sentences
 REPORT_TYPE_WORDS = ("리포트",)
+REPORT_TYPE_CODES = ("typ_002",)  # article.articleTypeCode for 리포트 (typ_001 = 스트레이트)
 # Items produced by these stations are not uploaded (still used as alignment anchors).
 # Per-program setting later (ProgramProfile).
 EXCLUDED_SOURCES = ("광주", "여수")
 # Department names that mean "our own newsroom" in reporter labels such as 홍길동(보도부).
 OWN_DEPARTMENTS = ("보도부", "보도국", "취재부", "편집부", "영상취재부")
 
-_REPORT_MARK_RE = re.compile(r"^\s*R\s*\]\s*|\s*\(R\)\s*$|^\s*\[?리포트\]\s*")
+_REPORT_MARK_RE = re.compile(r"^\s*R\s*\]\s*|\s*\(R(?:-\d+)?\)\s*$|^\s*\[?리포트\]\s*")
 _SERIES_RE = re.compile(r"^\s*\[?(?P<series>[^\[\]\s]{1,10})\]\s*")
 _STATION_RE = re.compile(r"^\s*(?P<station>[가-힣]{2,4})\)\s*")
 _REPORTER_UNIT_RE = re.compile(r"^\s*(?P<name>[^\s(]+)\s*\((?P<unit>[^)]+)\)\s*$")
@@ -64,11 +65,25 @@ def detect_source(title: Title, reporter_unit: str | None, extra_units: tuple[st
     return None, None
 
 
-def classify(remark: str | None, item_content: str | None, script: ParsedScript | None) -> tuple[ItemType, str]:
-    """Decide R/S/OTHER. Returns (type, reason)."""
+def classify(
+    remark: str | None,
+    item_content: str | None,
+    script: ParsedScript | None,
+    article_type: str | None = None,
+    article_type_code: str | None = None,
+) -> tuple[ItemType, str]:
+    """Decide R/S/OTHER. Returns (type, reason).
+
+    Order: cue sheet remark/content (the 비고 column) -> the article's type
+    (articleTypeCodeName / articleTypeCode) -> script structure.
+    """
     for field_name, value in (("remark", remark), ("cueSheetItemContent", item_content)):
         if value and any(w in value for w in REPORT_TYPE_WORDS):
             return ItemType.REPORT, f"{field_name}={value.strip()}"
+    if (article_type and any(w in article_type for w in REPORT_TYPE_WORDS)) or (
+        article_type_code in REPORT_TYPE_CODES
+    ):
+        return ItemType.REPORT, f"articleType={article_type or article_type_code}"
     if script is not None and script.sentences:
         has_report = any(s.section == "report" for s in script.sentences)
         if script.structured and has_report and script.signoff_reporter:
@@ -102,11 +117,42 @@ def parse_duration(value: Any) -> int | None:
     return h * 3600 + mnt * 60 + sec
 
 
+def _int(value: Any) -> int | None:
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def planned_from_article(article: dict[str, Any]) -> int | None:
+    """Planned length from the article (seconds): the cue sheet's 시간 column.
+
+    = ancMentCttTime + artclCttTime + artclExtTime (ext can be negative).
+    Checked against the 2026-11-04 print-out: 22/22 items match.
+    """
+    parts = [_int(article.get(k)) for k in ("ancMentCttTime", "artclCttTime", "artclExtTime")]
+    total = sum(p or 0 for p in parts)
+    return total if total > 0 else None
+
+
+def source_from_article(article: dict[str, Any]) -> tuple[str | None, str | None]:
+    """Other station named by the article's origin fields (IF_MARSL_003 article)."""
+    same = article.get("isSameChannel", article.get("sameChannel"))
+    origin = (article.get("originChannelName") or "").strip() or None
+    own = (article.get("channelName") or "").strip() or None
+    if same is False and origin:
+        return origin, f"isSameChannel=false (origin {origin})"
+    if origin and own and origin != own:
+        return origin, f"originChannelName={origin} != {own}"
+    return None, None
+
+
 def build_item(
     raw: dict[str, Any], planned_seconds: int | None = None, department: str | None = None
 ) -> RundownItem:
     """Build a RundownItem from one IF_MARSL_003 `data[]` element.
 
+    `planned_seconds` overrides the article's planned length (e.g. from the print-out).
     `department` is the reporter's unit when known from elsewhere (e.g. the print-out).
     """
     article = raw.get("article") or {}
@@ -115,15 +161,26 @@ def build_item(
     if script is not None and not script.sentences:
         script = None
     title_raw = article.get("articleTitle") or raw.get("cueSheetItemTitle") or ""
-    item_type, reason = classify(raw.get("remark"), raw.get("cueSheetItemContent"), script)
-    reporter, unit = split_reporter(article.get("reporterName"))
+    article_type = (article.get("articleTypeCodeName") or "").strip() or None
+    item_type, reason = classify(
+        raw.get("remark"), raw.get("cueSheetItemContent"), script, article_type, article.get("articleTypeCode")
+    )
+    # originReporterName is the author; reporterName can be the desk that imported the article.
+    reporter, unit = split_reporter(article.get("originReporterName") or article.get("reporterName"))
     title = clean_title(title_raw)
-    source, source_reason = detect_source(title, unit, (department,))
+    source, source_reason = source_from_article(article)
+    if source is None:
+        source, source_reason = detect_source(title, unit, (department,))
     if script is not None and item_type == ItemType.REPORT and reporter and script.signoff_reporter:
         if script.signoff_reporter not in reporter:
             script.warnings.append(f"SIGNOFF_REPORTER_MISMATCH:{script.signoff_reporter}!={reporter}")
+    if planned_seconds is None:
+        planned_seconds = planned_from_article(article)
     return RundownItem(
-        order=int(str(raw.get("cueSheetItemOrderNumber", "0")).strip() or 0),
+        order=_int(raw.get("cueSheetItemOrderNumber")) or 0,
+        item_id=_int(raw.get("cueSheetItemId")),
+        article_id=_int(article.get("articleId")),
+        article_type=article_type,
         title=title,
         reporter=reporter,
         item_type=item_type,
