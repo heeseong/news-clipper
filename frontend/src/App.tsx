@@ -3,6 +3,7 @@ import { Link, Navigate, Route, Routes } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { JobDetailPage } from "./pages/JobDetailPage";
 import { JobListPage } from "./pages/JobListPage";
+import { UploadPage } from "./pages/UploadPage";
 
 export function App() {
   return (
@@ -11,6 +12,7 @@ export function App() {
         <Route index element={<Navigate to="/jobs" replace />} />
         <Route path="jobs" element={<JobListPage />} />
         <Route path="jobs/:id" element={<JobDetailPage />} />
+        <Route path="upload" element={<UploadPage />} />
         <Route
           path="*"
           element={

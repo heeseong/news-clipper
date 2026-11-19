@@ -12,7 +12,12 @@ export function JobListPage() {
     <section>
       <div className="page-head">
         <h1>작업 목록</h1>
-        <DummyJobPanel />
+        <div className="head-actions">
+          <DummyJobPanel />
+          <Link to="/upload" className="btn btn-primary">
+            녹화본 업로드
+          </Link>
+        </div>
       </div>
 
       {jobs.isPending && <p className="muted">불러오는 중…</p>}
@@ -20,7 +25,9 @@ export function JobListPage() {
       {jobs.data && jobs.data.items.length === 0 && (
         <div className="empty">
           <p>작업이 없습니다.</p>
-          <p className="muted">녹화본을 업로드하면 여기에 표시됩니다.</p>
+          <p className="muted">
+            <Link to="/upload">녹화본을 업로드</Link>하면 여기에 표시됩니다.
+          </p>
         </div>
       )}
       {jobs.data && jobs.data.items.length > 0 && (
@@ -44,6 +51,11 @@ export function JobListPage() {
                 <td>
                   {job.program_name ?? "—"}
                   {job.is_dummy && <span className="tag">더미</span>}
+                  {job.warnings.length > 0 && (
+                    <span className="tag tag-warn" title={job.warnings.join("\n")}>
+                      경고 {job.warnings.length}
+                    </span>
+                  )}
                 </td>
                 <td>{job.broadcast_date ?? "—"}</td>
                 <td>
