@@ -96,29 +96,38 @@ def test_proxy_filter_scales_and_deinterlaces():
     base = dict(format_name="mxf", duration=10, start_time=0, fps=29.97, fps_rational="30000/1001",
                 video_codec="mpeg2video", audio=[])  # fmt: skip
     hd = ProbeResult(width=1920, height=1080, field_order="tt", **base)
-    assert proxy.proxy_video_filter(hd, 720).startswith("yadif=mode=send_frame")
-    assert "scale=-2:720" in proxy.proxy_video_filter(hd, 720)
+    assert proxy.proxy_video_filter(hd, 360).startswith("yadif=mode=send_frame")
+    assert "scale=-2:360" in proxy.proxy_video_filter(hd, 360)
     small = ProbeResult(width=320, height=240, field_order="progressive", **base)
-    f = proxy.proxy_video_filter(small, 720)
-    assert "yadif" not in f and "scale=-2:720" not in f
+    f = proxy.proxy_video_filter(small, 360)
+    assert "yadif" not in f and "scale=-2:360" not in f
 
 
-def test_sprite_and_waveform(synthetic_video, tmp_path):
-    p = probe(synthetic_video.path)
+def test_sprite_from_original_and_waveform(tmp_path):
+    """The sprite comes from the original frames in the proxy pass, not from the 360p proxy."""
+    v = make_synthetic_video(tmp_path / "hd.mp4", width=1280, height=720)
+    p = probe(v.path)
     prx = tmp_path / "proxy.mp4"
-    proxy.make_proxy(synthetic_video.path, prx, p, audio_order=0)
-    info = proxy.make_sprite(prx, tmp_path / "sprite.jpg", tmp_path / "sprite.json", p)
+    proxy.make_proxy(
+        v.path, prx, p, audio_order=0,
+        sprite_out=tmp_path / "sprite.jpg", sprite_info_out=tmp_path / "sprite.json",
+    )  # fmt: skip
+    assert (probe(prx).width, probe(prx).height) == (640, 360)
+    info = json.loads((tmp_path / "sprite.json").read_text())
+    assert info == proxy.sprite_layout(p)
     assert info["count"] == 8 and info["columns"] == 10 and info["rows"] == 1
+    assert (info["width"], info["height"]) == (160, 90)  # original aspect ratio
     dims = subprocess.run(
         ["ffprobe", "-v", "error", "-show_entries", "stream=width,height", "-of", "csv=p=0",
          str(tmp_path / "sprite.jpg")],
         capture_output=True, text=True, check=True,
     ).stdout.strip()  # fmt: skip
     assert dims == f"{10 * info['width']},{info['height']}"
+    assert not (tmp_path / "sprite.part.jpg").exists()
 
     wf = proxy.make_waveform(prx, tmp_path / "waveform.json", has_audio=True)
     peaks = wf["peaks"]
-    assert len(peaks) == pytest.approx(10 * synthetic_video.duration, abs=2)
+    assert len(peaks) == pytest.approx(10 * v.duration, abs=2)
     # The 5–6 s segment is silent, the first 2 s are a tone.
     assert max(peaks[52:58]) < 0.02
     assert min(peaks[2:18]) > 0.05  # lavfi sine amplitude is 1/8

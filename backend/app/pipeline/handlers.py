@@ -1,8 +1,8 @@
 """Step handlers for real jobs (dummy jobs use steps.dummy_handler).
 
 Implemented:
-- proxy: proxy video, sprite, waveform (spec 5.2) and scene cuts (spec 5.3). Cuts are detected in
-  the proxy encode so the source is decoded and deinterlaced once.
+- proxy: 360p proxy video, waveform (spec 5.2), and from the same decode of the original: the
+  thumbnail sprite and scene cuts (spec 5.3). The source is decoded and deinterlaced once.
 - analyze: alignment audio and silences (spec 5.3).
 Other steps are SKIPPED until their milestone.
 """
@@ -74,13 +74,11 @@ def proxy_step(ctx: StepContext) -> None:
             preset=s.proxy_preset,
             scenes_out=files.scenes,
             scene_threshold=s.scene_threshold,
+            sprite_out=files.sprite,
+            sprite_info_out=files.sprite_info,
             timeout=s.ffmpeg_timeout_seconds,
-            on_progress=_scaled(ctx.report, 0.0, 0.85),
+            on_progress=_scaled(ctx.report, 0.0, 0.95),
         )
-        proxy.make_sprite(
-            files.proxy, files.sprite, files.sprite_info, src.probe, timeout=s.ffmpeg_timeout_seconds
-        )
-        ctx.report(0.95)
         proxy.make_waveform(
             files.proxy, files.waveform, has_audio=audio_order is not None, timeout=s.ffmpeg_timeout_seconds
         )

@@ -36,40 +36,65 @@ def _scale_filters(probe: ProbeResult, height: int) -> list[str]:
     return filters
 
 
+def sprite_layout(probe: ProbeResult) -> dict:
+    """One thumbnail per second, SPRITE_COLUMNS per row, aspect ratio of the original."""
+    count = max(1, math.ceil(probe.duration))
+    return {
+        "interval": 1,
+        "count": count,
+        "columns": SPRITE_COLUMNS,
+        "rows": math.ceil(count / SPRITE_COLUMNS),
+        "width": SPRITE_THUMB_WIDTH,
+        "height": max(2, round(SPRITE_THUMB_WIDTH * probe.height / probe.width / 2) * 2),
+    }
+
+
 def make_proxy(
     src: Path,
     out: Path,
     probe: ProbeResult,
     *,
     audio_order: int | None,
-    height: int = 720,
+    height: int = 360,
     crf: int = 28,
     preset: str = "veryfast",
     scenes_out: Path | None = None,
     scene_threshold: float = 0.1,
+    sprite_out: Path | None = None,
+    sprite_info_out: Path | None = None,
     timeout: float | None = None,
     on_progress: ProgressFn | None = None,
 ) -> dict | None:
-    """720p H.264, GOP 1 s, AAC 128k, faststart. Same frame rate as the source and PTS starting
-    at 0, so a time on the proxy is the same time on the original.
+    """360p H.264 (by default), GOP 1 s, AAC 128k, faststart. Same frame rate as the source and
+    PTS starting at 0, so a time on the proxy is the same time on the original.
 
-    With `scenes_out`, scene cuts are detected in the same pass (one decode + deinterlace for
-    both, the expensive part on 1080i sources) and written there; returns the scenes data."""
+    The source is decoded (and deinterlaced) once and split into:
+    - the proxy,
+    - scene cut detection when `scenes_out` is given (returns the scenes data),
+    - the thumbnail sprite when `sprite_out` is given, taken from the original frames rather
+      than the low-resolution proxy.
+    """
     out.parent.mkdir(parents=True, exist_ok=True)
     gop = max(1, round(probe.fps))
     meta = scenes_out.with_suffix(".txt") if scenes_out else None
-    args = ["-i", str(src)]
-    if meta is None:
-        args += ["-map", "0:v:0", "-vf", proxy_video_filter(probe, height)]
-    else:
+    sprite = sprite_layout(probe) if sprite_out else None
+
+    branches = [f"{','.join(_scale_filters(probe, height))}[proxy]"]
+    if meta is not None:
         meta.parent.mkdir(parents=True, exist_ok=True)
-        head = f"{DEINTERLACE}," if probe.interlaced else ""
-        graph = (
-            f"[0:v:0]{head}split=2[pv][sv];"
-            f"[pv]{','.join(_scale_filters(probe, height))}[proxy];"
-            f"[sv]{scene_filter(scene_threshold, meta)}[scenes]"
+        branches.append(f"{scene_filter(scene_threshold, meta)}[scenes]")
+    if sprite is not None:
+        branches.append(
+            f"fps=1,scale={sprite['width']}:{sprite['height']},"
+            f"tile={sprite['columns']}x{sprite['rows']}[sprite]"
         )
-        args += ["-filter_complex", graph, "-map", "[proxy]"]
+    head = f"{DEINTERLACE}," if probe.interlaced else ""
+    labels = [f"[b{i}]" for i in range(len(branches))]
+    graph = f"[0:v:0]{head}split={len(branches)}{''.join(labels)};" + ";".join(
+        f"{label}{branch}" for label, branch in zip(labels, branches, strict=True)
+    )
+
+    args = ["-i", str(src), "-filter_complex", graph, "-map", "[proxy]"]
     if audio_order is not None:
         args += ["-map", f"0:a:{audio_order}", "-c:a", "aac", "-b:a", "128k", "-ac", "2"]
     args += [
@@ -80,41 +105,21 @@ def make_proxy(
         "-map_metadata", "-1",
         str(_part(out)),
     ]  # fmt: skip
+    if sprite_out is not None:
+        sprite_out.parent.mkdir(parents=True, exist_ok=True)
+        args += ["-map", "[sprite]", "-frames:v", "1", "-q:v", "5", "-update", "1", str(_part(sprite_out))]
     if meta is not None:
+        # Mapping audio keeps cut times on the file-start axis (see analysis.detect_scenes).
         args += ["-map", "[scenes]", "-f", "null", "-"]
     run_ffmpeg(args, duration=probe.duration, on_progress=on_progress, timeout=timeout)
     _part(out).replace(out)
+    if sprite_out is not None and sprite is not None:
+        _part(sprite_out).replace(sprite_out)
+        if sprite_info_out is not None:
+            sprite_info_out.write_text(json.dumps(sprite))
     if scenes_out is not None and meta is not None:
         return write_scenes(meta, scenes_out, probe, scene_threshold)
     return None
-
-
-def make_sprite(
-    proxy: Path, out: Path, info_out: Path, probe: ProbeResult, timeout: float | None = None
-) -> dict:
-    """One thumbnail per second, tiled SPRITE_COLUMNS wide into a single JPEG."""
-    count = max(1, math.ceil(probe.duration))
-    rows = math.ceil(count / SPRITE_COLUMNS)
-    thumb_h = max(2, round(SPRITE_THUMB_WIDTH * probe.height / probe.width / 2) * 2)
-    run_ffmpeg(
-        [
-            "-i", str(proxy), "-an",
-            "-vf", f"fps=1,scale={SPRITE_THUMB_WIDTH}:{thumb_h},tile={SPRITE_COLUMNS}x{rows}",
-            "-frames:v", "1", "-q:v", "5", str(_part(out)),
-        ],
-        timeout=timeout,
-    )  # fmt: skip
-    _part(out).replace(out)
-    info = {
-        "interval": 1,
-        "count": count,
-        "columns": SPRITE_COLUMNS,
-        "rows": rows,
-        "width": SPRITE_THUMB_WIDTH,
-        "height": thumb_h,
-    }
-    info_out.write_text(json.dumps(info))
-    return info
 
 
 def make_waveform(proxy: Path, out: Path, has_audio: bool, timeout: float | None = None) -> dict:

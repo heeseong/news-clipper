@@ -42,7 +42,7 @@ http://localhost:8080 에서 작업 목록이 열린다. **업로드** 화면에
 - 대괄호 안의 단계는 병렬로 실행되고, 모두 성공해야 다음 묶음으로 넘어간다 (Celery chord).
 - 단계 정의: `backend/app/pipeline/definition.py`. 상태 전이: `orchestrator.py`. Celery 태스크: `tasks.py`.
 - 단계 처리기는 `backend/app/pipeline/handlers.py`에서 `@register("proxy")`로 등록한다. 처리기가 없는 단계는 `SKIPPED`(미구현)로 넘어간다.
-  - `proxy`: 720p 프록시(GOP 1초, 원본과 같은 fps·시간축), 1초 간격 스프라이트, 파형, **장면 전환**(ffmpeg scene 0.1). 장면 전환을 프록시 인코딩과 같은 패스에서 찾아 원본을 한 번만 디코딩·디인터레이스한다
+  - `proxy`: 360p 프록시(검수 재생용, GOP 1초, 원본과 같은 fps·시간축), 파형, 그리고 같은 디코딩 패스에서 **원본 프레임으로** 1초 간격 스프라이트와 **장면 전환**(ffmpeg scene 0.1)을 만든다. 원본은 한 번만 디코딩·디인터레이스한다
   - `analyze`: 정렬용 오디오(16kHz mono WAV, 프로그램 프로필의 오디오 트랙 또는 전체 다운믹스), 무음 구간(-35dB, 0.25초 이상)
   - 시각은 모두 **파일 시작 기준 초**(정렬용 오디오와 같은 축). 비디오 스트림이 오디오보다 늦게 시작하는 파일이면 첫 프레임이 0이 아니다(`probe.json`의 `video_start`)
 - 저장 위치: `storage/jobs/{id}/` (spec 6.2). 업로드 중인 파일은 `storage/uploads/`

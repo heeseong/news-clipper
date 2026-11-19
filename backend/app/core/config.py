@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     allowed_extensions: str = "mp4,mov,mxf,mkv,ts"
 
     # Media processing (spec 5.2, 5.3)
-    proxy_height: int = 720
+    proxy_height: int = 360  # review only; final renders and thumbnails use the original
     proxy_crf: int = 28
     proxy_preset: str = "veryfast"
     scene_threshold: float = 0.1  # PoC: 0.3 missed 2 of 8 anchor-shot cuts
