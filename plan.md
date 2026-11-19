@@ -104,25 +104,49 @@ news-clipper/
 
 ---
 
-## M2. 큐시트·원고 연동 및 파서 (파이프라인 4)
-> **상태**: 2.4~2.6, 2.8의 핵심 로직은 `backend/app/newsroom/`에 구현됨(단위 테스트 포함). 다른 방송사 리포트 제외(2.11)도 구현됨. DB 모델·API·UI 연결은 남음.
+## M2. 큐시트·원고 연동 및 파서 (파이프라인 4) — 다음 작업
+> **상태**: 파서·판별 핵심 로직(2.4~2.8, 2.11)은 `backend/app/newsroom/`에 구현돼 있고 단위 테스트가 있다. Provider, DB 모델, 파이프라인 단계, API, 화면 연결이 남았다.
 
-| # | Task |
-|---|---|
-| 2.1 | `NewsroomProvider` 인터페이스 + `FakeNewsroomProvider` (MARS-L 명세의 응답 형식 그대로인 JSON 픽스처) |
-| 2.2 | `MarsLProvider`: IF_MARSL_001~004 클라이언트, 인증 헤더(`Mars-Secret`, 001에서 확인), 공통 오류 응답 처리, 재시도, 필드 별칭·공백·날짜 형식 정규화, `programType` 필터 |
-| 2.3 | Rundown / RundownItem 모델, 큐시트 매칭(방송일 + 프로그램명 + 시작 시각), 원본 응답 저장, `cueSheetVersion` 기반 최종판 확인·판 변경 차이 기록 |
-| 2.4 | **원고 파서**: 섹션(`◀앵커▶`/`◀리포트▶`/`◀END▶`), 인터뷰·스탠드업·사인오프 구분, 발화 아닌 요소 제거, 줄바꿈으로 끊긴 문장 복원, 문장 분할 |
-| 2.5 | 메모 파싱(`memo` 또는 본문 내 표기 → 썸네일·상단·수퍼), 제목 정리 규칙(`R]`, `(R)` 등) |
-| 2.6 | **형식(R/S) 판별**: `remark`/`cueSheetItemContent` → 원고 구조 → 004 기사 형식 매칭. 판별 근거 저장 |
-| 2.7 | **예정 길이**: 003 응답의 `ancMentCttTime + artclCttTime + artclExtTime` (출력물과 일치 확인, 004 매칭 불필요). 값이 없으면 원고 글자 수로 낭독 시간 추정 — 로직 구현됨 |
-| 2.8 | 파서·판별 단위 테스트: 표기 변형(`st-up`/`S/U`, `mbc`/`MBC`), END 누락, 사인오프 누락, 공백 붙은 프로그램명 등 |
-| 2.9 | 업로드 폼의 큐시트 미리보기 API + UI (판 수, 리포트 수, 예정 총 길이), `WAITING_RUNDOWN` 상태와 수동 재조회 |
-| 2.10 | 실제 API로 2026-11-18 뉴스투데이 조회 → 픽스처 갱신, 파서 검증 (액세스 키 확보 후) |
-| 2.11 | 다른 방송사 리포트 제외(제목 `광주)`, 기자 `이름(광주)`; 제외 목록은 프로그램 프로필 설정) — 로직 구현됨, 프로필 연결 남음 |
-| 2.12 | 제목 정리 보완: `(R-1)`, `/기자명` 같은 접미어 제거, 큐시트 기자(데스크)와 사인오프 기자가 다를 때 사인오프 기자를 메타데이터에 사용 |
+| # | Task | 상태 |
+|---|---|---|
+| 2.1 | `NewsroomProvider` 인터페이스 + `FakeNewsroomProvider` (MARS-L 실제 응답 형식 그대로인 **합성** JSON 픽스처) | 남음 |
+| 2.2 | `MarsLProvider`: IF_MARSL_001~003 클라이언트(004는 필요 없음, 아래), 인증 헤더 `Mars-Secret`, 공통 오류 응답 처리, 재시도(429·5xx·타임아웃), 필드 별칭·공백·날짜 형식 정규화, `programType == "TV"` 필터 | 남음 |
+| 2.3 | Rundown / RundownItem DB 모델, 큐시트 매칭(방송일 + 프로그램명 trim + 시작 시각), 원본 응답 저장, `cueSheetVersion` 기반 최종판 확인·판 변경 차이 기록 | 남음 |
+| 2.4 | **원고 파서**: 섹션, 인터뷰·스탠드업·사인오프 구분, 발화 아닌 요소 제거, 끊긴 줄 복원, 문장 분할 | 구현됨 (`script_parser.py`) |
+| 2.5 | 메모 파싱(썸네일·상단·수퍼), 제목 정리(`R]`, `(R)` 등) | 구현됨. 단 실제 API의 `memo`는 비어 있음(spec 3.1) |
+| 2.6 | **형식(R/S) 판별**: `remark` → `articleTypeCode`(003의 `article`에 들어 있음) → 원고 구조. 판별 근거 저장 | 구현됨 (`rundown.classify`). 004 매칭은 필요 없음 |
+| 2.7 | **예정 길이**: `ancMentCttTime + artclCttTime + artclExtTime`, 없으면 원고 글자 수로 추정 | 구현됨 (`planned_from_article`, `estimate_seconds`) |
+| 2.8 | 파서·판별 단위 테스트 | 구현됨 (`tests/test_script_parser.py`) |
+| 2.9 | 업로드 폼의 큐시트 미리보기 API + UI (판 수, 리포트 수, 예정 총 길이, 큐시트 없으면 경고), `WAITING_RUNDOWN` 상태와 수동 재조회 | 남음 |
+| 2.10 | 실제 API로 큐시트 조회해 파서 검증 (액세스 키 필요) | 응답 형식은 확인됨(11-01, 11-04, spec 3.1). 서비스 코드로 실제 호출은 남음 |
+| 2.11 | 다른 방송사 리포트 제외(`isSameChannel`/`originChannelName` 우선, 제목 `광주)`, 기자 `이름(광주)`) | 로직 구현됨. 제외 목록을 `ProgramProfile.excluded_sources`와 연결하는 일이 남음 (지금은 `rundown.EXCLUDED_SOURCES` 상수) |
+| 2.12 | 제목 정리 보완: `(R-1)`, `/기자명` 접미어 제거, 큐시트 기자(데스크)와 사인오프 기자가 다를 때 사인오프 기자 사용 | 남음 (`(R-1)`은 이미 처리됨) |
 
-**DoD**: Fake 데이터로 업로드 폼에서 큐시트가 미리 보이고, 리포트 아이템의 원고가 리드·본문·사인오프·메모로 파싱돼 저장된다.
+**DoD**: Fake 데이터로 업로드 폼에서 큐시트가 미리 보이고, 리포트 아이템의 원고가 리드·본문·사인오프·메모로 파싱돼 저장된다. 작업의 `newsroom` 단계가 SKIPPED가 아니라 실제로 실행된다.
+
+### M2 시작 가이드 (새 세션용)
+
+**먼저 읽을 것**: spec 3.1(MARS-L API, 실제 응답 특징), 3.2(출처 판별), 5.4(큐시트 매칭 규칙), 10(`WAITING_RUNDOWN`)
+
+**이미 있는 코드 (M0·M1)와 연결점**
+- 파이프라인에 `newsroom` 단계가 이미 있다: `backend/app/pipeline/definition.py`의 첫 묶음 `[proxy | analyze | newsroom]`, 큐는 `ai`. 지금은 처리기가 없어 `SKIPPED`로 넘어간다. `backend/app/pipeline/handlers.py`에 `@register("newsroom")`로 처리기를 추가하면 바로 실행된다
+  - 처리기는 `StepContext`(job_id, attempt, job_dir, report)를 받는다. 일시 오류는 `RetryableStepError`(자동 재시도), 그 밖은 `StepError`
+  - 처리기 패턴은 같은 파일의 `proxy_step`, `analyze_step` 참고. Job 정보는 `session_scope()`로 읽는다
+- `Job`에 `program_id`, `broadcast_date`가 이미 있다(업로드 폼에서 입력). `ProgramProfile`에 `name`, `broadcast_time`, `excluded_sources`, `newsroom_program_id` 칼럼이 이미 있다 (`backend/app/models/`)
+- `JobStatus.WAITING_RUNDOWN`은 정의만 돼 있고 오케스트레이터(`orchestrator.py`)는 아직 다루지 않는다. 큐시트를 못 찾았을 때 이 상태로 두고 수동 재조회(`POST /api/jobs/{id}/rundown/refresh`, spec 8)로 이어 가는 흐름을 설계해야 한다. 단계 실패(FAILED)와 다르게 보여야 한다
+- 저장 경로: spec 6.2의 `jobs/{id}/newsroom/rundown.json, scripts/{item_no}.json`. 경로는 `backend/app/storage.py`의 `JobFiles`에 추가한다
+- 업로드 화면(`frontend/src/pages/UploadPage.tsx`)에 프로그램 선택·방송일 입력이 있다. 큐시트 미리보기(2.9)는 여기에 붙인다
+- 작업 상세(`frontend/src/pages/JobDetailPage.tsx`)에 큐시트 아이템 목록(형식, 출처, 업로드 대상 여부, 예정 길이)을 보여 주면 M3·M5 전에 결과를 눈으로 확인하기 좋다
+- 파서 진입점: `newsroom.rundown.build_item(raw_003_item) -> RundownItem` (pydantic). DB 저장 모델은 이와 별도로 만든다(spec 7의 Rundown, RundownItem 칼럼)
+- 설정 추가 위치: `backend/app/core/config.py`(`Settings`). MARS-L 기본 URL·키(`MARSL_API_KEY`)·Provider 선택(fake/marsl)을 여기에 둔다. 키는 로그에 남기지 않는다
+
+**정한 것 (M0·M1)**: 외부 연동은 인터페이스 + Fake 먼저(CLAUDE.md). 모델을 바꾸면 Alembic 마이그레이션(`0003_...`, 파일 이름은 `backend/alembic/versions/000N_설명.py`), `tests/test_migrations.py`가 모델과 일치하는지 확인한다. 테스트 데이터는 합성만 쓴다
+
+**사용자에게 받아야 하는 것**
+- MARS-L 액세스 키: 실제 API 호출(2.10)에만 필요. Fake로 DoD까지는 키 없이 진행할 수 있다
+  - 이 클라우드 환경(news-clipper)은 `api.marsl.co.kr`이 허용 호스트에 없고 저장된 키도 없다. 실제 호출이 필요해지면 환경에 호스트 추가를 요청하고, 키는 채팅이 아니라 자격 증명 입력 양식으로 받는다(헤더 `Mars-Secret`)
+  - 앱 서버에서 `api.marsl.co.kr`로 나갈 수 있는지(IP 허용 목록 여부)는 미결 (spec 16)
+- 실제 큐시트·원고(PDF 출력물 또는 API 응답 JSON): 파서 검증용. `eval/data/`에 두고 커밋하지 않는다. 지난 세션의 `eval/data/`는 남아 있지 않다
 
 ---
 
@@ -237,7 +261,7 @@ news-clipper/
 | M-PoC | 완료 | 방송 4편 검증 |
 | M0 | 완료 | 로그인(0.7) 보류 |
 | M1 | 완료 | |
-| M2 | 3일 | 파서 핵심 로직은 구현됨. 실제 API 검증(2.10)은 액세스 키 확보 후 |
+| M2 | 3일 | 다음 작업. 파서 핵심 로직은 구현됨. 실제 API 검증(2.10)은 액세스 키 확보 후 |
 | M3 | 5일 | PoC 코드 이전 + 회귀 확인 |
 | M4 | 3일 | |
 | M5 | 7일 | |
