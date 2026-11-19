@@ -229,3 +229,61 @@ def test_other_station_report_is_not_uploaded():
 def test_brief_is_never_uploaded():
     raw = {"cueSheetItemOrderNumber": "7", "article": {"articleTitle": "단신", "articleContent": "단신입니다."}}
     assert not build_item(raw).upload
+
+
+# Shaped like a real IF_MARSL_003 element (synthetic text). The API keeps the editor's
+# line breaks, including breaks inside a word, and leading spaces after them.
+API_REPORT = {
+    "cueSheetId": 1,
+    "cueSheetItemId": 101,
+    "cueSheetItemTitle": "새 다리 개통..출근길 숨통(R)",
+    "cueSheetItemContent": None,
+    "cueSheetItemOrderNumber": "1",
+    "article": {
+        "articleId": 9001,
+        "articleTitle": "새 다리 개통..출근길 숨통(R)",
+        "articleContent": "◀ 앵 커 ▶\n 새 다리가 오늘 \n개통했습니다.\n\n홍길동 기자입니다.\n◀ 리포트 ▶\n 길이 1킬로미터의 다\n리가 문을 열었습니다.\n\n◀ INT ▶ 김철수 / 시민\n\"출근길이 편해졌어요.\"\n\n MBC뉴스 홍길동입니다.\n◀ END ▶\n\n\n",
+        "ancMentCttTime": 20,
+        "artclCttTime": 95,
+        "artclExtTime": -5,
+        "memo": None,
+        "reporterName": "홍길동",
+        "originReporterName": "홍길동",
+        "articleTypeCode": "typ_002",
+        "articleTypeCodeName": "리포트",
+        "channelName": "목포",
+        "originChannelName": "목포",
+        "isSameChannel": True,
+    },
+    "remark": "리포트",
+}
+
+
+def test_build_item_from_real_api_shape():
+    item = build_item(API_REPORT)
+    assert (item.order, item.item_id, item.article_id) == (1, 101, 9001)
+    assert item.item_type == ItemType.REPORT and item.upload
+    assert item.planned_seconds == 115  # ancMentCttTime + artclCttTime
+    assert item.script.signoff_reporter == "홍길동" and item.script.warnings == []
+    assert item.script.lead[0].text == "새 다리가 오늘 개통했습니다."
+
+
+def test_article_type_classifies_without_remark():
+    raw = {**API_REPORT, "remark": None}
+    item = build_item(raw)
+    assert item.item_type == ItemType.REPORT and item.type_reason == "articleType=리포트"
+    brief = {
+        **raw,
+        "article": {**raw["article"], "articleTypeCode": "typ_001", "articleTypeCodeName": "스트레이트",
+                    "articleContent": "군이 축제를 엽니다."},
+    }
+    assert build_item(brief).item_type == ItemType.BRIEF
+
+
+def test_other_station_from_article_origin_fields():
+    # Imported by our desk (reporterName) but written at another station; no title prefix.
+    article = {**API_REPORT["article"], "reporterName": "데스크", "originReporterName": "문아무개",
+               "originChannelName": "여수", "isSameChannel": False}
+    item = build_item({**API_REPORT, "article": article})
+    assert item.source == "여수" and not item.upload
+    assert item.reporter == "문아무개"

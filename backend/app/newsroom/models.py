@@ -75,6 +75,9 @@ class Title(BaseModel):
 
 class RundownItem(BaseModel):
     order: int
+    item_id: int | None = None  # cueSheetItemId
+    article_id: int | None = None  # article.articleId
+    article_type: str | None = None  # article.articleTypeCodeName, e.g. 리포트 / 스트레이트
     title: Title
     reporter: str | None
     item_type: ItemType
