@@ -6,14 +6,58 @@ import logging
 import time
 import uuid
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from app.api import health, jobs
+from app.api import events, health, jobs, media, programs, uploads
 from app.core.config import get_settings
 from app.core.logging import setup_logging
 
 log = logging.getLogger("app.request")
+QUIET_PATHS = ("/healthz", "/readyz", "/api/events")
+QUIET_METHODS = ("HEAD", "PATCH")  # tus offset checks and chunks
+
+
+class RequestLogMiddleware:
+    """Logs one line per request and sets x-request-id. Pure ASGI so streaming bodies
+    (tus uploads) and responses (SSE) pass through untouched."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        headers = dict(scope.get("headers") or [])
+        request_id = headers.get(b"x-request-id", b"").decode() or uuid.uuid4().hex[:12]
+        start = time.perf_counter()
+        status_code = 500
+
+        async def send_wrapper(message: Message) -> None:
+            nonlocal status_code
+            if message["type"] == "http.response.start":
+                status_code = message["status"]
+                message.setdefault("headers", [])
+                message["headers"] = [*message["headers"], (b"x-request-id", request_id.encode())]
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_wrapper)
+        finally:
+            path, method = scope.get("path", ""), scope.get("method", "")
+            if path not in QUIET_PATHS and method not in QUIET_METHODS:
+                log.info(
+                    "request",
+                    extra={
+                        "request_id": request_id,
+                        "method": method,
+                        "path": path,
+                        "status": status_code,
+                        "duration_ms": round((time.perf_counter() - start) * 1000, 1),
+                    },
+                )
 
 
 def create_app() -> FastAPI:
@@ -27,29 +71,17 @@ def create_app() -> FastAPI:
         allow_origins=settings.cors_origin_list,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["Location", "Upload-Offset", "Upload-Length", "Tus-Resumable", "x-request-id"],
     )
 
-    @app.middleware("http")
-    async def log_requests(request: Request, call_next):
-        request_id = request.headers.get("x-request-id") or uuid.uuid4().hex[:12]
-        start = time.perf_counter()
-        response = await call_next(request)
-        response.headers["x-request-id"] = request_id
-        if request.url.path not in ("/healthz", "/readyz"):
-            log.info(
-                "request",
-                extra={
-                    "request_id": request_id,
-                    "method": request.method,
-                    "path": request.url.path,
-                    "status": response.status_code,
-                    "duration_ms": round((time.perf_counter() - start) * 1000, 1),
-                },
-            )
-        return response
+    app.add_middleware(RequestLogMiddleware)
 
     app.include_router(health.router)
     app.include_router(jobs.router)
+    app.include_router(programs.router)
+    app.include_router(uploads.router)
+    app.include_router(events.router)
+    app.include_router(media.router)
     return app
 
 

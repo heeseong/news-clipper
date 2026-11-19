@@ -148,7 +148,11 @@ def test_duplicate_delivery_of_finished_step_is_skipped():
     assert steps(load(job_id))["proxy"] == (StepStatus.SUCCEEDED, 1)
 
 
-def test_unimplemented_step_fails_real_jobs():
+def test_unimplemented_steps_are_skipped(monkeypatch):
+    """Steps without a handler are SKIPPED and do not stop the pipeline."""
+    from app.pipeline import steps as steps_mod
+
+    monkeypatch.setattr(steps_mod, "_HANDLERS", {"proxy": lambda ctx: None})
     with session_scope() as s:
         job = Job(status=JobStatus.UPLOADED)
         orch.create_steps(job)
@@ -157,5 +161,30 @@ def test_unimplemented_step_fails_real_jobs():
         job_id = job.id
     tasks.start_job(job_id)
     job = load(job_id)
-    assert job.status == JobStatus.FAILED
-    assert "not implemented" in job.error
+    assert job.status == JobStatus.REVIEW_READY
+    st = steps(job)
+    assert st["proxy"] == (StepStatus.SUCCEEDED, 1)
+    assert st["analyze"][0] == StepStatus.SKIPPED
+    assert "구현되지" in next(r.error for r in job.steps if r.step == "analyze")
+
+
+def test_progress_is_recorded(monkeypatch):
+    from app.pipeline import steps as steps_mod
+
+    seen = []
+
+    def handler(ctx):
+        ctx.report(0.5)
+        with session_scope() as s:
+            seen.append(orch._step(s, ctx.job_id, ctx.step).progress)
+
+    monkeypatch.setattr(steps_mod, "_HANDLERS", {"proxy": handler})
+    with session_scope() as s:
+        job = Job(status=JobStatus.UPLOADED)
+        orch.create_steps(job)
+        s.add(job)
+        s.flush()
+        job_id = job.id
+    tasks.start_job(job_id)
+    assert seen == [0.5]
+    assert next(r for r in load(job_id).steps if r.step == "proxy").progress is None  # cleared when done
