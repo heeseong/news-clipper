@@ -7,7 +7,7 @@
   - v0.1: STT + LLM 기반 경계 탐지
   - v0.2: **큐시트·원고 + 원고-오디오 정렬 기반으로 전환** (STT는 보조 수단), 업로드 대상을 **리포트(R)로 한정**
   - v0.3: MARS-L 외부 API 명세 반영(3.1~3.2, 5.4). 형식(R/S)·예정 길이가 API에 없어 대안 규칙 추가
-  - v1.1: MARS-L 큐시트 목록 API(001) 실제 응답 반영: 경로·인증 헤더 확정, `programType` 필드, 큐시트 매칭 규칙 (3.1, 5.4)
+  - v1.1: MARS-L 큐시트 목록(001)·조회(002) API 실제 응답 반영: 경로·인증 헤더 확정, `programType` 필드, 큐시트 매칭 규칙 (3.1, 5.4)
   - v1.0: 4차 블라인드 검증(11-05) 반영: 앵커 컷과 리드 사이에 말소리가 있으면 인사말로 보고 제외 (5-3)
   - v0.9: 3차 검증(11-04) 반영: 판정 실패 시 다음 컷부터 재정렬, 원고 없는 아이템 길이를 탐색 창에 반영 (5-2)
   - v0.8: 오정렬 판정에 길이 비율 추가, 원고-녹화본 불일치 감지(날짜 확인, 방송 단위 경고) (5.1, 5-3-1)
@@ -77,7 +77,8 @@
 | IF_MARSL_004 | 취재데스크 기사 조회 | `GET /api/external/article/list?startDate=&endDate=&page=&size=` | 기사 형식·예정 시간 보조 정보 |
 
 - 기본 URL: `https://api.marsl.co.kr`, 경로 접두어 `/api/external` (HTTPS 필수). **확인됨(2026-11-19)**: `GET https://api.marsl.co.kr/api/external/cuesheet/list?startDate=2026-11-01&endDate=2026-11-01`
-- 인증: 요청 헤더 `Mars-Secret: <지역사 액세스 키>`. **확인됨(001)**. 키는 환경변수(`MARSL_API_KEY`)로만 받고 로그·저장소에 남기지 않는다
+- 큐시트 조회(002): `GET https://api.marsl.co.kr/api/external/cuesheet/{cueSheetId}` **확인됨(2026-11-19)**. `data`가 객체 하나이고 필드는 목록(001)의 원소와 같다(`programType` 포함). 판 수(`cueSheetVersion`) 폴링에 쓴다
+- 인증: 요청 헤더 `Mars-Secret: <지역사 액세스 키>`. **확인됨(001, 002)**. 키는 환경변수(`MARSL_API_KEY`)로만 받고 로그·저장소에 남기지 않는다
 - 공통 응답: `{status, success, data}`. 실패 시 `{errorCode, message, details, success:false}` — 40000(잘못된 요청), 20001(권한 없음), 20000(인증 오류), 50000(시스템 오류)
 
 **주요 필드와 용도**
