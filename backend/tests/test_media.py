@@ -62,7 +62,9 @@ def test_missing_binaries_raise_ffmpeg_error(monkeypatch, tmp_path):
 
 def test_run_ffmpeg_timeout():
     with pytest.raises(FfmpegError, match="timed out"):
-        run_ffmpeg(["-f", "lavfi", "-i", "sine=duration=600", "-f", "null", "-"], timeout=0.5)
+        # -re reads at real-time speed, so this takes 600 s on any machine (without it a fast
+        # CPU finishes before the timeout).
+        run_ffmpeg(["-re", "-f", "lavfi", "-i", "sine=duration=600", "-f", "null", "-"], timeout=0.5)
 
 
 # --- proxy ----------------------------------------------------------------------------------

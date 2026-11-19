@@ -21,6 +21,8 @@ from app.schemas.job import (
     JobDetailOut,
     JobListOut,
     JobOut,
+    SceneCut,
+    SilenceRange,
     StageOut,
 )
 from app.storage import JobFiles
@@ -94,10 +96,11 @@ def get_analysis(job_id: int, db: DbSession) -> AnalysisOut:
     out = AnalysisOut()
     if files.scenes.exists():
         data = json.loads(files.scenes.read_text())
-        out.scenes = data["cuts"]
+        out.scenes = [SceneCut.model_validate(c) for c in data["cuts"]]
         out.scene_threshold = data.get("threshold")
     if files.silences.exists():
-        out.silences = json.loads(files.silences.read_text())["silences"]
+        silences = json.loads(files.silences.read_text())["silences"]
+        out.silences = [SilenceRange.model_validate(r) for r in silences]
     return out
 
 
