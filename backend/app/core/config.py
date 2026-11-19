@@ -25,12 +25,29 @@ class Settings(BaseSettings):
     # Comma-separated origins allowed by CORS (the Vite dev server in development).
     cors_origins: str = "http://localhost:5173"
 
+    # Uploads (spec 5.1)
+    max_upload_bytes: int = 50 * 1024**3
+    allowed_extensions: str = "mp4,mov,mxf,mkv,ts"
+
+    # Media processing (spec 5.2, 5.3)
+    proxy_height: int = 720
+    proxy_crf: int = 28
+    proxy_preset: str = "veryfast"
+    scene_threshold: float = 0.1  # PoC: 0.3 missed 2 of 8 anchor-shot cuts
+    silence_noise_db: float = -35.0
+    silence_min_seconds: float = 0.25
+    ffmpeg_timeout_seconds: int = 3 * 3600
+
     # Run Celery tasks in-process (tests, or running the API without workers).
     celery_always_eager: bool = False
 
     # Development helpers: POST /api/jobs/dummy creates a job whose steps only sleep.
     enable_dev_endpoints: bool = True
     dummy_step_seconds: float = 2.0
+
+    @property
+    def allowed_extension_set(self) -> set[str]:
+        return {e.strip().lower().lstrip(".") for e in self.allowed_extensions.split(",") if e.strip()}
 
     @property
     def cors_origin_list(self) -> list[str]:
