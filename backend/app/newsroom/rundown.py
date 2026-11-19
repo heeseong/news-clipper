@@ -21,7 +21,7 @@ EXCLUDED_SOURCES = ("광주", "여수")
 # Department names that mean "our own newsroom" in reporter labels such as 홍길동(보도부).
 OWN_DEPARTMENTS = ("보도부", "보도국", "취재부", "편집부", "영상취재부")
 
-_REPORT_MARK_RE = re.compile(r"^\s*R\s*\]\s*|\s*\(R\)\s*$|^\s*\[?리포트\]\s*")
+_REPORT_MARK_RE = re.compile(r"^\s*R\s*\]\s*|\s*\(R(?:-\d+)?\)\s*$|^\s*\[?리포트\]\s*")
 _SERIES_RE = re.compile(r"^\s*\[?(?P<series>[^\[\]\s]{1,10})\]\s*")
 _STATION_RE = re.compile(r"^\s*(?P<station>[가-힣]{2,4})\)\s*")
 _REPORTER_UNIT_RE = re.compile(r"^\s*(?P<name>[^\s(]+)\s*\((?P<unit>[^)]+)\)\s*$")
@@ -125,14 +125,14 @@ def _int(value: Any) -> int | None:
 
 
 def planned_from_article(article: dict[str, Any]) -> int | None:
-    """Planned length from the article: anchor lead + report body (seconds).
+    """Planned length from the article (seconds): the cue sheet's 시간 column.
 
-    artclExtTime (can be negative) is not included until checked against the
-    cue sheet's 시간 column.
+    = ancMentCttTime + artclCttTime + artclExtTime (ext can be negative).
+    Checked against the 2026-11-04 print-out: 22/22 items match.
     """
-    anc, body = _int(article.get("ancMentCttTime")), _int(article.get("artclCttTime"))
-    total = (anc or 0) + (body or 0)
-    return total or None
+    parts = [_int(article.get(k)) for k in ("ancMentCttTime", "artclCttTime", "artclExtTime")]
+    total = sum(p or 0 for p in parts)
+    return total if total > 0 else None
 
 
 def source_from_article(article: dict[str, Any]) -> tuple[str | None, str | None]:

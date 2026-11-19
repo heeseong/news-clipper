@@ -101,7 +101,7 @@
 
 **003 실제 응답 (2026-11-01 뉴스데스크로 확인)**
 - 아이템: `cueSheetItemId`, `cueSheetItemOrderNumber`(문자열 `"1"`), `cueSheetItemTitle`, `remark`(리포트는 `"리포트"`, 단신은 `null`), `cueSheetItemContent`(`null`)
-- `article`에 명세서의 004(취재데스크) 필드가 들어 있다: `articleId`, `ancMentCttTime`·`artclCttTime`·`artclExtTime`(초, ext는 음수 가능), `articleTypeCode`/`articleTypeCodeName`(`typ_002` 리포트, `typ_001` 스트레이트), `originReporterName`, `channelName`·`originChannelName`, `isSameChannel`(명세서의 `sameChannel`). **004 매칭은 필요 없다**
+- `article`에 명세서의 004(취재데스크) 필드가 들어 있다: `articleId`, `ancMentCttTime`·`artclCttTime`·`artclExtTime`(초, ext는 음수 가능. **큐시트 `시간` = 세 값의 합**, 11-04 출력물과 22/22 일치), `articleTypeCode`/`articleTypeCodeName`(`typ_002` 리포트, `typ_001` 스트레이트), `originReporterName`, `channelName`·`originChannelName`, `isSameChannel`(명세서의 `sameChannel`). **004 매칭은 필요 없다**
 - **타이틀·주요뉴스·구분선처럼 기사가 없는 아이템은 응답에 없다.** 번호는 첫 기사부터 1이다(출력물에서는 타이틀이 1번). 그래서 이런 아이템의 예정 길이는 알 수 없고, 정렬은 첫 아이템 앞부분 여유(300초)와 재정렬로 처리한다
 - `memo`는 모든 아이템에서 `null`이었다. 출력물 왼쪽 칸의 썸네일·상단 문구는 API로 오지 않는다 → 썸네일 문구는 LLM 생성이나 검수자 입력으로 대신한다
 - `articleContent`는 편집기의 줄바꿈을 그대로 담는다. 단어 중간에서 끊긴 줄(`"조\n선 수군"`)과 줄 앞 공백이 있다. 파서는 문단 안의 줄을 공백으로 이어 붙인다(정렬에는 영향 없음)
@@ -581,7 +581,7 @@ storage/jobs/{job_id}/
    - 2026-11-18 뉴스투데이의 `detailed-item-list` 실제 응답 1건: 리포트 아이템의 `articleContent`에 `◀앵커▶`·`◀END▶` 표기가 그대로 오는지, 원고 왼쪽 칸 메모(썸네일·상단)가 `memo`에 오는지, `remark`/`cueSheetItemContent`에 "리포트" 같은 형식 정보가 오는지
    - ~~인증 헤더 이름과 경로 접두어~~ → 확인됨: `Mars-Secret`, `/api/external` (2026-11-19)
    - ~~`articleContent` 표기, `memo`, `remark`~~ → 확인됨(003): 표기 그대로, `memo`는 비어 있음, `remark`에 "리포트"
-   - 큐시트 출력물의 아이템 `시간`이 `ancMentCttTime + artclCttTime`인지, `artclExtTime`까지 더한 값인지 (골든셋 날짜의 003 응답과 출력물을 비교해 확인)
+   - ~~큐시트 `시간` 공식~~ → 확인됨: `ancMentCttTime + artclCttTime + artclExtTime` (11-04, 22/22)
    - 004 API(취재데스크)도 같은 헤더 이름(`Mars-Secret`)을 쓰는지 (명세서에는 `MarsL-Secret`)
    - 액세스 키 발급, 앱 서버에서 `api.marsl.co.kr`로의 네트워크 접근(IP 허용 목록 여부)
 2. **녹화본 샘플**: 2026-11-18 뉴스투데이 녹화본 (정렬 PoC와 첫 골든셋에 사용)

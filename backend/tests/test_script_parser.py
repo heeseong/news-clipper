@@ -153,6 +153,7 @@ def test_clean_title():
     assert clean_title('R] "주사무소 전남 줄게" 말뿐?').clean == '"주사무소 전남 줄게" 말뿐?'
     assert clean_title("R]20대 용접공 사망 2주").clean == "20대 용접공 사망 2주"
     assert clean_title("새 다리 개통").series is None
+    assert clean_title(' "선정 보류·재검증하라"…서남권 집단 반발(R-2)').clean == '"선정 보류·재검증하라"…서남권 집단 반발'
 
 
 def test_classify_priority():
@@ -263,7 +264,7 @@ def test_build_item_from_real_api_shape():
     item = build_item(API_REPORT)
     assert (item.order, item.item_id, item.article_id) == (1, 101, 9001)
     assert item.item_type == ItemType.REPORT and item.upload
-    assert item.planned_seconds == 115  # ancMentCttTime + artclCttTime
+    assert item.planned_seconds == 110  # ancMentCttTime + artclCttTime + artclExtTime
     assert item.script.signoff_reporter == "홍길동" and item.script.warnings == []
     assert item.script.lead[0].text == "새 다리가 오늘 개통했습니다."
 
