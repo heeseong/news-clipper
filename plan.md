@@ -43,9 +43,35 @@ news-clipper/
 
 ---
 
-## M0. 프로젝트 기반
-| # | Task |
-|---|---|
+## M0. 프로젝트 기반 — 완료 (2026-11-19)
+> 로그인(0.7)은 M0에서 빼고 필요할 때 추가한다. `User` 모델과 역할(Role)만 만들어 뒀다.
+
+| # | Task | 상태 |
+|---|---|---|
+| 0.1 | 디렉터리 구조, `.env.example`, README | 완료 |
+| 0.2 | Docker Compose: postgres, redis, migrate, api, worker(media/align/ai/publish), web. FFmpeg 포함 이미지 | 완료 |
+| 0.3 | FastAPI 골격, 설정(pydantic-settings), 구조화 로깅(JSON), `/healthz`·`/readyz` | 완료 |
+| 0.4 | SQLAlchemy + Alembic, 기본 모델(User, ProgramProfile, Job, JobStep) | 완료 |
+| 0.5 | Celery 앱, 큐 4개, 오케스트레이터(병렬 그룹 → 합류 → 다음 단계, JobStep 기록, 자동 재시도·단계별 수동 재시도) | 완료 |
+| 0.6 | React + Vite + TS 골격, API 클라이언트, 라우팅, 레이아웃, 작업 목록·상세 화면 | 완료 |
+| 0.7 | 로그인, 역할 기반 권한 | **보류** (필요할 때 추가) |
+| 0.8 | pytest, 합성 테스트 영상 fixture, CI(lint + test) | 완료 |
+
+**DoD**: `docker compose up` 후 빈 작업 목록이 보이고, 더미 Job이 병렬·순차 단계를 거치며 상태가 바뀐다. (로그인은 0.7 보류로 제외)
+
+**검증 (2026-11-19, 클라우드 세션)**
+- `docker compose up`으로 전체 스택을 띄워 빈 목록 → 더미 작업 → REVIEW_READY까지 확인. 단계별 로그가 해당 큐의 워커에서 나오는 것도 확인
+- 단, 세션 네트워크에서 deb.debian.org가 막혀 있어 **FFmpeg를 뺀 백엔드 이미지**로 확인했다. FFmpeg 설치를 포함한 이미지 빌드는 CI(Docker 작업)에서 처음 확인된다
+- 실제 Celery 워커 + Redis + PostgreSQL에서 병렬 실행, 합류, 일시 오류 자동 재시도, 실패 → 수동 재시도 확인
+- 진행률은 1초 폴링으로 보여준다. SSE는 M1(1.8)
+
+**M0에서 정한 것**
+- 파이프라인 단계: `[proxy | analyze | newsroom] → [align] → [metadata | thumbnails]`. `analyze`는 spec 3단계(정렬용 오디오, 장면 전환, 무음). 단계 이름이 바뀌면 `backend/app/pipeline/definition.py`만 고친다
+- 오케스트레이션 콜백은 `ai` 큐에서 돈다(큐를 4개로 유지하면서, 오래 걸리는 media·align 작업 뒤에 밀리지 않게)
+- 단계 처리기는 오류를 Job·JobStep에 기록하고 정상 종료한다. 다음 단계로 갈지는 chord 콜백이 DB 상태를 보고 정한다
+- 백엔드 이미지의 FFmpeg는 Debian 패키지(현재 7.x)를 쓴다. align 워커는 M3에서 PyTorch를 넣은 별도 이미지로 나눈다
+
+---|---|
 | 0.1 | 디렉터리 구조, `.env.example`, README |
 | 0.2 | Docker Compose: postgres, redis, api, worker(media/align/ai/publish), web. FFmpeg 포함 이미지 |
 | 0.3 | FastAPI 골격, 설정(pydantic-settings), 구조화 로깅, `/healthz` |
@@ -206,7 +232,7 @@ news-clipper/
 | 마일스톤 | 기간 | 비고 |
 |---|---|---|
 | M-PoC | 완료 | 방송 4편 검증 |
-| M0 | 3일 | |
+| M0 | 완료 | 로그인(0.7) 보류 |
 | M1 | 4일 | |
 | M2 | 3일 | 파서 핵심 로직은 구현됨. 실제 API 검증(2.10)은 액세스 키 확보 후 |
 | M3 | 5일 | PoC 코드 이전 + 회귀 확인 |
