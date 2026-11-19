@@ -11,6 +11,10 @@ x-backend: &backend
   build: ./backend
   image: news-clipper-backend
   restart: unless-stopped
+  # Optional settings from .env (PROXY_PRESET, SCENE_THRESHOLD, ...); `environment` below wins.
+  env_file:
+    - path: .env
+      required: false
   environment:
     APP_ENV: ${APP_ENV:-prod}
     DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-newsclipper}:${POSTGRES_PASSWORD:-newsclipper}@postgres:5432/${POSTGRES_DB:-newsclipper}

@@ -22,6 +22,7 @@ from .steps import StepContext
 log = logging.getLogger(__name__)
 
 ACTIVE = (StepStatus.QUEUED, StepStatus.RUNNING, StepStatus.RETRYING)
+DONE = (StepStatus.SUCCEEDED, StepStatus.SKIPPED)
 
 
 class TransitionError(Exception):
@@ -70,7 +71,11 @@ def begin_stage(session: Session, job_id: int, stage_idx: int) -> list[QueuedSte
     job.error = None
     queued = []
     for row in job.steps:
-        if row.stage == stage_idx and row.status in (StepStatus.PENDING, StepStatus.FAILED):
+        if row.stage == stage_idx and row.status in (
+            StepStatus.PENDING,
+            StepStatus.FAILED,
+            StepStatus.SKIPPED,
+        ):
             row.status = StepStatus.QUEUED
             row.error = None
             queued.append(QueuedStep(row.step, row.queue))
@@ -86,6 +91,7 @@ def mark_running(session: Session, job_id: int, step: str) -> StepContext | None
     if row.status == StepStatus.SUCCEEDED:
         return None
     row.status = StepStatus.RUNNING
+    row.progress = 0.0
     row.attempts += 1
     row.started_at = utcnow()
     row.finished_at = None
@@ -105,7 +111,23 @@ def mark_succeeded(session: Session, job_id: int, step: str) -> None:
     row = _step(session, job_id, step)
     row.status = StepStatus.SUCCEEDED
     row.finished_at = utcnow()
+    row.progress = None
     row.error = None
+
+
+def mark_skipped(session: Session, job_id: int, step: str, reason: str) -> None:
+    row = _step(session, job_id, step)
+    row.status = StepStatus.SKIPPED
+    row.finished_at = utcnow()
+    row.progress = None
+    row.error = reason
+
+
+def set_progress(session: Session, job_id: int, step: str, fraction: float) -> None:
+    row = _step(session, job_id, step)
+    if row.status == StepStatus.RUNNING:
+        row.progress = round(fraction, 3)
+        row.job.updated_at = utcnow()
 
 
 def mark_retrying(session: Session, job_id: int, step: str, error: str) -> None:
@@ -119,6 +141,7 @@ def mark_failed(session: Session, job_id: int, step: str, error: str) -> None:
     row = _step(session, job_id, step)
     row.status = StepStatus.FAILED
     row.finished_at = utcnow()
+    row.progress = None
     row.error = error
     job = row.job
     job.status = JobStatus.FAILED
@@ -130,7 +153,7 @@ def stage_outcome(
     session: Session, job_id: int, stage_idx: int
 ) -> Literal["succeeded", "failed", "incomplete"]:
     rows = [r for r in _job(session, job_id).steps if r.stage == stage_idx]
-    if all(r.status == StepStatus.SUCCEEDED for r in rows):
+    if all(r.status in DONE for r in rows):
         return "succeeded"
     if any(r.status in ACTIVE or r.status == StepStatus.PENDING for r in rows):
         return "incomplete"
@@ -150,9 +173,9 @@ def prepare_retry(session: Session, job_id: int, step: str) -> int:
         raise TransitionError("다른 단계가 아직 실행 중입니다")
     stage_idx, _ = STEPS[step]
     target = _step(session, job_id, step)
-    if target.status not in (StepStatus.FAILED, StepStatus.SUCCEEDED):
+    if target.status not in (StepStatus.FAILED, *DONE):
         raise TransitionError(f"'{step}' 단계는 아직 실행되지 않았습니다")
-    if any(r.stage < stage_idx and r.status != StepStatus.SUCCEEDED for r in job.steps):
+    if any(r.stage < stage_idx and r.status not in DONE for r in job.steps):
         raise TransitionError("앞 단계가 끝나지 않았습니다")
     for row in job.steps:
         if row.step == step or row.stage > stage_idx:
@@ -160,5 +183,6 @@ def prepare_retry(session: Session, job_id: int, step: str) -> int:
             row.error = None
             row.started_at = None
             row.finished_at = None
+            row.progress = None
     log.info("step retry requested", extra={"job_id": job_id, "step": step})
     return stage_idx

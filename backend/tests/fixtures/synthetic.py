@@ -72,7 +72,10 @@ def make_synthetic_video(
     width: int = 320,
     height: int = 240,
     sample_rate: int = 48000,
+    start_offset: float = 0.0,
 ) -> SyntheticVideo:
+    """`start_offset` shifts timestamps (use a .ts path), like broadcast recordings whose first
+    frame is not at 0."""
     args = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y"]
     for s in segments:
         args += ["-f", "lavfi", "-i", f"color=c={s.color}:s={width}x{height}:r={fps}:d={s.seconds}"]
@@ -101,7 +104,9 @@ def make_synthetic_video(
         "aac",
         "-ac",
         "1",
-        str(path),
     ]
+    if start_offset:
+        args += ["-output_ts_offset", str(start_offset)]
+    args += [str(path)]
     subprocess.run(args, check=True)
     return SyntheticVideo(path, tuple(segments), fps, width, height)

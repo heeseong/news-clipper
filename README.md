@@ -28,7 +28,9 @@ cp .env.example .env    # 비밀번호, 동시 실행 수 조정
 docker compose up -d --build
 ```
 
-http://localhost:8080 에서 작업 목록이 열린다. 아직 업로드 기능이 없으므로(M1) **더미 작업 실행** 버튼으로 파이프라인을 확인한다. 더미 작업은 각 단계가 몇 초씩 대기만 하며, 특정 단계를 실패시키거나(수동 재시도 확인) 일시 오류를 내서(자동 재시도 확인) 볼 수 있다. 운영에서는 `ENABLE_DEV_ENDPOINTS=false`로 끈다.
+http://localhost:8080 에서 작업 목록이 열린다. **업로드** 화면에서 녹화본을 끌어다 놓고 프로그램·방송일을 고르면 업로드(끊겨도 이어 올리기) → 영상 검사 → 프록시·분석이 자동으로 진행되고, 작업 화면에서 프록시를 재생하며 장면 전환·무음 목록을 볼 수 있다.
+
+**더미 작업 실행** 버튼은 단계마다 몇 초씩 대기만 하는 작업을 만든다. 특정 단계를 실패시키거나(수동 재시도 확인) 일시 오류를 내서(자동 재시도 확인) 파이프라인 동작을 볼 수 있다. 운영에서는 `ENABLE_DEV_ENDPOINTS=false`로 끈다.
 
 ## 파이프라인
 
@@ -39,7 +41,11 @@ http://localhost:8080 에서 작업 목록이 열린다. 아직 업로드 기능
 
 - 대괄호 안의 단계는 병렬로 실행되고, 모두 성공해야 다음 묶음으로 넘어간다 (Celery chord).
 - 단계 정의: `backend/app/pipeline/definition.py`. 상태 전이: `orchestrator.py`. Celery 태스크: `tasks.py`.
-- 단계 처리기는 `backend/app/pipeline/steps.py`의 `@register("proxy")`로 등록한다. M0에는 더미 처리기만 있다.
+- 단계 처리기는 `backend/app/pipeline/handlers.py`에서 `@register("proxy")`로 등록한다. 처리기가 없는 단계는 `SKIPPED`(미구현)로 넘어간다.
+  - `proxy`: 360p 프록시(검수 재생용, GOP 1초, 원본과 같은 fps·시간축), 파형, 그리고 같은 디코딩 패스에서 **원본 프레임으로** 1초 간격 스프라이트와 **장면 전환**(ffmpeg scene 0.1)을 만든다. 원본은 한 번만 디코딩·디인터레이스한다
+  - `analyze`: 정렬용 오디오(16kHz mono WAV, 프로그램 프로필의 오디오 트랙 또는 전체 다운믹스), 무음 구간(-35dB, 0.25초 이상)
+  - 시각은 모두 **파일 시작 기준 초**(정렬용 오디오와 같은 축). 비디오 스트림이 오디오보다 늦게 시작하는 파일이면 첫 프레임이 0이 아니다(`probe.json`의 `video_start`)
+- 저장 위치: `storage/jobs/{id}/` (spec 6.2). 업로드 중인 파일은 `storage/uploads/`
 - 일시 오류(`RetryableStepError`)는 지수 백오프로 자동 재시도하고, 그 밖의 오류는 단계를 `FAILED`로 만든다. 실패한 단계부터 다시 실행할 수 있다(`POST /api/jobs/{id}/steps/{step}/retry`). 앞 단계 결과는 그대로 둔다.
 
 ## 개발
@@ -72,7 +78,7 @@ npm run lint && npm run build
 ### CI
 `.github/workflows/ci.yml`: 백엔드 lint + 테스트(SQLite, PostgreSQL), 프론트엔드 lint + 타입 검사 + 빌드, Docker 이미지 빌드.
 
-## API (M0)
+## API
 
 | 메서드 | 경로 | 설명 |
 |---|---|---|
@@ -82,5 +88,11 @@ npm run lint && npm run build
 | GET | `/api/jobs`, `/api/jobs/{id}` | 작업 목록 / 상세(단계 포함) |
 | POST | `/api/jobs/{id}/steps/{step}/retry` | 단계부터 재실행 |
 | POST | `/api/jobs/dummy` | 더미 작업 생성 (개발용) |
+| OPTIONS/POST/HEAD/PATCH/DELETE | `/api/uploads[/{id}]` | 녹화본 업로드 (tus 1.0, 50MB 청크) |
+| POST | `/api/jobs` | 업로드 완료 파일로 작업 생성 (ffprobe 검증, 날짜·중복 경고) |
+| GET | `/api/jobs/{id}/analysis` | 장면 전환·무음 |
+| GET | `/api/events` | SSE: 작업 변경 알림 (Redis pub/sub) |
+| GET/POST/PUT | `/api/programs` | 프로그램 프로필 (최소 기능, 관리 화면은 M9) |
+| GET | `/media/jobs/{id}/{proxy.mp4,sprite.jpg,sprite.json,waveform.json}` | 프록시·스프라이트·파형 (Range 지원) |
 
 API 문서: http://localhost:8000/docs (로컬 실행 시)

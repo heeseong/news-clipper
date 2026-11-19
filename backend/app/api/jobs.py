@@ -1,15 +1,31 @@
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import AppSettings, DbSession
+from app.core.events import publish_job_changed
+from app.intake import IntakeError, create_job_from_upload
 from app.models import Job, JobStatus
 from app.pipeline import tasks
 from app.pipeline.definition import PIPELINE, STEPS
 from app.pipeline.orchestrator import TransitionError, create_steps
-from app.schemas.job import DummyJobIn, JobDetailOut, JobListOut, JobOut, StageOut
+from app.schemas.job import (
+    AnalysisOut,
+    ArtifactsOut,
+    DummyJobIn,
+    JobCreateIn,
+    JobDetailOut,
+    JobListOut,
+    JobOut,
+    SceneCut,
+    SilenceRange,
+    StageOut,
+)
+from app.storage import JobFiles
 
 router = APIRouter(prefix="/api", tags=["jobs"])
 
@@ -17,6 +33,15 @@ router = APIRouter(prefix="/api", tags=["jobs"])
 def _job_out(job: Job, model: type[JobOut] = JobOut) -> JobOut:
     out = model.model_validate(job)
     out.program_name = job.program.name if job.program else None
+    if isinstance(out, JobDetailOut):
+        files = JobFiles(job.id)
+        out.artifacts = ArtifactsOut(
+            proxy=files.proxy.exists(),
+            sprite=files.sprite.exists() and files.sprite_info.exists(),
+            waveform=files.waveform.exists(),
+            scenes=files.scenes.exists(),
+            silences=files.silences.exists(),
+        )
     return out
 
 
@@ -49,6 +74,36 @@ def get_job(job_id: int, db: DbSession) -> JobOut:
     return _job_out(_get_job(db, job_id), JobDetailOut)
 
 
+@router.post("/jobs", response_model=JobDetailOut, status_code=status.HTTP_201_CREATED)
+def create_job(body: JobCreateIn, db: DbSession) -> JobOut:
+    """Create a job from a finished tus upload and start the pipeline."""
+    try:
+        job = create_job_from_upload(db, body.upload_id, body.program_id, body.broadcast_date)
+    except IntakeError as e:
+        db.rollback()
+        raise HTTPException(e.status, str(e)) from e
+    db.commit()
+    tasks.start_job(job.id)
+    db.expire_all()
+    return _job_out(_get_job(db, job.id), JobDetailOut)
+
+
+@router.get("/jobs/{job_id}/analysis", response_model=AnalysisOut)
+def get_analysis(job_id: int, db: DbSession) -> AnalysisOut:
+    """Scene cuts and silences found by the analyze step (empty fields until it has run)."""
+    _get_job(db, job_id)
+    files = JobFiles(job_id)
+    out = AnalysisOut()
+    if files.scenes.exists():
+        data = json.loads(files.scenes.read_text())
+        out.scenes = [SceneCut.model_validate(c) for c in data["cuts"]]
+        out.scene_threshold = data.get("threshold")
+    if files.silences.exists():
+        silences = json.loads(files.silences.read_text())["silences"]
+        out.silences = [SilenceRange.model_validate(r) for r in silences]
+    return out
+
+
 @router.post("/jobs/dummy", response_model=JobDetailOut, status_code=status.HTTP_201_CREATED)
 def create_dummy_job(
     body: DummyJobIn,
@@ -71,6 +126,7 @@ def create_dummy_job(
     create_steps(job)
     db.add(job)
     db.commit()
+    publish_job_changed(job.id)
     tasks.start_job(job.id)
     db.expire_all()
     return _job_out(_get_job(db, job.id), JobDetailOut)

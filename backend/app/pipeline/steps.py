@@ -4,8 +4,8 @@ A handler does the work of one pipeline step for one job. It must be idempotent:
 again after a failure or a worker restart. It signals a transient problem (network, 5xx) with
 `RetryableStepError`; any other exception fails the step.
 
-M0 has only the dummy handler. Real handlers are registered with `@register("proxy")` etc.
-in later milestones.
+Handlers live in `handlers.py` and register with `@register("proxy")`. A step without a handler
+is SKIPPED (not implemented yet), so a real job still runs through the pipeline.
 """
 
 from __future__ import annotations
@@ -28,6 +28,10 @@ class RetryableStepError(StepError):
     """Transient failure; the step is retried with backoff."""
 
 
+class StepSkipped(Exception):
+    """The step has nothing to do (e.g. not implemented yet); it is marked SKIPPED."""
+
+
 @dataclass
 class StepContext:
     job_id: int
@@ -36,6 +40,8 @@ class StepContext:
     job_dir: Path  # storage/jobs/{job_id}
     is_dummy: bool = False
     params: dict[str, Any] = field(default_factory=dict)
+    # Set by the task runner: report(fraction 0..1). Calls are throttled there.
+    report: Callable[[float], None] = field(default=lambda fraction: None, repr=False)
 
 
 Handler = Callable[[StepContext], None]
@@ -68,7 +74,8 @@ def dummy_handler(ctx: StepContext) -> None:
 def resolve_handler(step: str, is_dummy: bool) -> Handler:
     if is_dummy:
         return dummy_handler
-    try:
-        return _HANDLERS[step]
-    except KeyError:
-        raise StepError(f"step '{step}' is not implemented yet") from None
+    return _HANDLERS.get(step, _not_implemented)
+
+
+def _not_implemented(ctx: StepContext) -> None:
+    raise StepSkipped(f"'{ctx.step}' 단계는 아직 구현되지 않았습니다")

@@ -15,6 +15,7 @@ class JobStepOut(BaseModel):
     queue: str
     status: StepStatus
     attempts: int
+    progress: float | None
     started_at: datetime | None
     finished_at: datetime | None
     error: str | None
@@ -31,13 +32,53 @@ class JobOut(BaseModel):
     current_step: str | None
     error: str | None
     duration: float | None
+    fps: float | None
+    width: int | None
+    height: int | None
+    source_name: str | None
+    source_size: int | None
+    warnings: list[str]
     is_dummy: bool
     created_at: datetime
     updated_at: datetime
 
 
+class ArtifactsOut(BaseModel):
+    """Which outputs exist (the browser fetches them from /media/jobs/{id}/...)."""
+
+    proxy: bool = False
+    sprite: bool = False
+    waveform: bool = False
+    scenes: bool = False
+    silences: bool = False
+
+
 class JobDetailOut(JobOut):
     steps: list[JobStepOut]
+    artifacts: ArtifactsOut = ArtifactsOut()
+
+
+class JobCreateIn(BaseModel):
+    upload_id: str
+    program_id: int | None = None
+    broadcast_date: date
+
+
+class SceneCut(BaseModel):
+    time: float
+    frame: int
+    score: float
+
+
+class SilenceRange(BaseModel):
+    start: float
+    end: float
+
+
+class AnalysisOut(BaseModel):
+    scenes: list[SceneCut] | None = None  # None until the analyze step has produced them
+    silences: list[SilenceRange] | None = None
+    scene_threshold: float | None = None
 
 
 class JobListOut(BaseModel):

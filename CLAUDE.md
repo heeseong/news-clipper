@@ -5,7 +5,7 @@
 
 ## 먼저 읽을 것
 - `spec.md` — 기능 명세(v1.0). 정렬·경계 규칙의 근거는 5.5절
-- `plan.md` — 마일스톤과 진행 상태. M0 완료(로그인 보류), 다음 작업은 **M1(수집·프록시·신호 분석)**
+- `plan.md` — 마일스톤과 진행 상태. M0·M1 완료(로그인 보류), 다음 작업은 **M2(큐시트·원고 연동)**
 - `eval/poc/RESULTS.md` — 정렬 PoC 결과와 방송별 실패 사례
 
 ## 핵심 결정 (바꾸기 전에 사용자와 확인)
@@ -19,7 +19,10 @@
 ## 저장소 구조 (현재)
 - `backend/app/core/` — 설정(`config.py`, 환경변수), JSON 로깅, DB 세션
 - `backend/app/models/` — SQLAlchemy 모델(User, ProgramProfile, Job, JobStep). 바꾸면 Alembic 마이그레이션(`backend/alembic/`)도 만든다
-- `backend/app/pipeline/` — 단계 정의(`definition.py`), 상태 전이(`orchestrator.py`, Celery 없음), Celery 태스크(`tasks.py`), 단계 처리기 등록(`steps.py`, `@register("proxy")`)
+- `backend/app/pipeline/` — 단계 정의(`definition.py`), 상태 전이(`orchestrator.py`, Celery 없음), Celery 태스크(`tasks.py`), 단계 처리기(`handlers.py`, `@register("proxy")`). 처리기가 없는 단계는 SKIPPED
+- `backend/app/media/` — ffprobe·ffmpeg 래퍼(`ffmpeg.py`), 프록시·스프라이트·파형(`proxy.py`), 정렬용 오디오·장면 전환·무음(`analysis.py`)
+- `backend/app/uploads.py`, `api/uploads.py` — tus 업로드. `intake.py` — 업로드 → 작업 생성(ffprobe 검증, 경고). `storage.py` — 저장 경로
+- `backend/app/core/events.py`, `api/events.py` — Redis pub/sub → SSE 작업 변경 알림
 - `backend/app/api/` — FastAPI 라우터. `backend/app/worker.py` — Celery 앱(큐 media/align/ai/publish)
 - `backend/app/newsroom/` — 원고 파서(`script_parser.py`), 큐시트 아이템 판별·제목 정리·출처 판별(`rundown.py`), 모델(`models.py`)
 - `backend/app/align/korean_text.py` — 정렬용 한글 발음 변환(숫자, 영문, 발음 사전)
@@ -58,6 +61,8 @@ python eval/tools/inspect_rundown.py eval/data/<날짜>-<프로그램>
 - 첫 리포트에는 거의 항상 앵커 인사말이 있다. 와이드 샷에서 시작해 앵커 컷 뒤까지 이어지기도 한다 → 컷과 리드 사이 음절 수로 감지
 - 장면 컷 검출은 임계값을 낮게(ffmpeg scene 0.1). 컷 프레임은 한 프레임짜리 블렌드일 수 있다(시작 +1프레임, 끝 -½프레임)
 - 프레임 단위로 정확히 자르려면 출력 쪽에서 길이를 지정한다(`-ss A -i IN -t D`). 입력 쪽 `-to`는 한 프레임이 더 들어간다
+- 신호 시각(컷, 무음, 정렬)은 모두 **파일 시작 기준**이다. 비디오만 쓰는 ffmpeg 실행(`-map 0:v -an`)은 비디오 스트림 시작 기준으로 재므로, 오디오가 먼저 시작하는 파일에서는 어긋난다 → 장면 검출 때도 오디오 스트림을 함께 매핑한다
+- ffmpeg scene 점수는 밝기 변화를 본다. 색상만 바뀌는 합성 영상(testsrc2 + hue)으로는 컷이 안 잡히니 테스트 영상은 밝기가 다른 장면으로 만든다
 - 숫자는 읽는 소리대로 바꾼다(고유어 수사: `8곳` → `여덟곳`). 철자와 다르게 읽는 단어는 발음 사전에 넣는다(`KIA` → `기아`)
 
 ## 작업 방식
