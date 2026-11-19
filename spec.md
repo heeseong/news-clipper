@@ -2,11 +2,12 @@
 
 > 종합뉴스 방송 녹화본을 **큐시트·원고(MARS-L)**에 맞춰 리포트 단위로 자동 분할하고, 제목·설명·썸네일을 만든 뒤 검수를 거쳐 YouTube 등 채널에 예약 업로드하는 사내 웹 애플리케이션.
 
-- 문서 버전: v1.0 (2026-11-18)
+- 문서 버전: v1.1 (2026-11-19)
 - 변경 이력
   - v0.1: STT + LLM 기반 경계 탐지
   - v0.2: **큐시트·원고 + 원고-오디오 정렬 기반으로 전환** (STT는 보조 수단), 업로드 대상을 **리포트(R)로 한정**
   - v0.3: MARS-L 외부 API 명세 반영(3.1~3.2, 5.4). 형식(R/S)·예정 길이가 API에 없어 대안 규칙 추가
+  - v1.1: MARS-L 큐시트 목록 API(001) 실제 응답 반영: 경로·인증 헤더 확정, `programType` 필드, 큐시트 매칭 규칙 (3.1, 5.4)
   - v1.0: 4차 블라인드 검증(11-05) 반영: 앵커 컷과 리드 사이에 말소리가 있으면 인사말로 보고 제외 (5-3)
   - v0.9: 3차 검증(11-04) 반영: 판정 실패 시 다음 컷부터 재정렬, 원고 없는 아이템 길이를 탐색 창에 반영 (5-2)
   - v0.8: 오정렬 판정에 길이 비율 추가, 원고-녹화본 불일치 감지(날짜 확인, 방송 단위 경고) (5.1, 5-3-1)
@@ -75,8 +76,8 @@
 | IF_MARSL_003 | 큐시트 상세(아이템) 조회 | `GET /api/external/cuesheet/{cueSheetId}/detailed-item-list` | 아이템 순서 + 원고 본문 |
 | IF_MARSL_004 | 취재데스크 기사 조회 | `GET /api/external/article/list?startDate=&endDate=&page=&size=` | 기사 형식·예정 시간 보조 정보 |
 
-- 기본 URL: `https://api.marsl.co.kr` (HTTPS 필수)
-- 인증: 헤더에 지역사 액세스 키. 명세서에 `Mars-Secret`과 `MarsL-Secret`이 섞여 있어 실제 이름을 확인해야 한다
+- 기본 URL: `https://api.marsl.co.kr`, 경로 접두어 `/api/external` (HTTPS 필수). **확인됨(2026-11-19)**: `GET https://api.marsl.co.kr/api/external/cuesheet/list?startDate=2026-11-01&endDate=2026-11-01`
+- 인증: 요청 헤더 `Mars-Secret: <지역사 액세스 키>`. **확인됨(001)**. 키는 환경변수(`MARSL_API_KEY`)로만 받고 로그·저장소에 남기지 않는다
 - 공통 응답: `{status, success, data}`. 실패 시 `{errorCode, message, details, success:false}` — 40000(잘못된 요청), 20001(권한 없음), 20000(인증 오류), 50000(시스템 오류)
 
 **주요 필드와 용도**
@@ -84,7 +85,8 @@
 | API | 필드 | 용도 |
 |---|---|---|
 | 001/002 | `cueSheetId` | 큐시트 식별자 |
-| 001/002 | `programName`, `broadcastDate`, `broadcastStartTime`, `broadcastDurationTime`(분) | 녹화본과 매칭. 예정 총 길이 검증 |
+| 001/002 | `programName`, `programType`, `broadcastDate`, `broadcastStartTime` | 녹화본과 매칭 (`programType`: `TV` / `라디오`, 명세서에 없던 필드) |
+| 001/002 | `channelCode`, `channelName` | 지역사(예: `목포` / `목포문화방송`) |
 | 001/002 | `cueSheetVersion` | 판 수. **값이 바뀌면 큐시트가 수정된 것** |
 | 001/002 | `anchor1Name`, `anchor2Name` | 메타데이터 |
 | 003 | `cueSheetItemOrderNumber` | 방송 순서 |
@@ -96,7 +98,9 @@
 | 004 | `articleTypeCode`, `articleTypeCodeName` | 기사 형식(예: `typ_001` 스트레이트) |
 
 **데이터 품질 주의**
-- `programName`에 공백이 붙어 온다(`"뉴스데스크      "`) → trim 후 비교
+- `programName`에 공백이 붙어 온다(`"뉴스데스크 "`, 실제 응답에서도 확인) → trim 후 비교
+- 실제 응답(001)에서 `broadcastDurationTime`은 `0`, `broadcastEndTime`은 방송일+시작 시각(`"2026-11-01T19:30"`)이었다 → **둘 다 쓰지 않는다**. 예정 총 길이는 아이템 예정 길이의 합으로 구한다
+- 같은 날짜 목록에 라디오 큐시트도 섞여 온다(`programType: "라디오"`, 시작 시각 `00:00:00`, `cueSheetVersion: 0`) → `programType == "TV"`만 매칭 대상
 - `cueSheetItemOrderNumber`가 예시는 문자열, 명세는 Integer → 둘 다 허용
 - 예시의 `broadcastEndTime`(`"2023-08-17T08:40"`)이 `broadcastDate`(08-18)와 날짜가 다름 → 신뢰하지 않음
 - 날짜 형식이 섞여 있음(`yyyy-MM-dd HH:mm:ss`, ISO) → 관대하게 파싱
@@ -218,7 +222,7 @@ class NewsroomProvider(Protocol):
 ```
 - 구현: `MarsLProvider`(httpx, 액세스 키 헤더, 타임아웃 10초, 429·5xx 지수 백오프 재시도) + `FakeNewsroomProvider`(API 응답 형식 그대로의 JSON 픽스처)
 - 원본 응답 JSON은 그대로 저장한다(파서 개선 후 재파싱, 장애 분석용)
-- **큐시트 매칭**: 방송일로 목록을 조회 → `programName`(trim)이 프로그램 프로필의 이름과 같은 것 → 여러 개면 `broadcastStartTime`이 가장 가까운 것. 그래도 애매하면 업로드 폼에서 사용자가 고른다
+- **큐시트 매칭**: 방송일로 목록을 조회(`startDate=endDate=방송일`) → `programType == "TV"` → `programName`(trim)이 프로그램 프로필의 이름과 같은 것 → 여러 개면 `broadcastStartTime`이 프로필의 방송 시각(예: 뉴스데스크 19:30)에 가장 가까운 것 → 그래도 애매하면 업로드 폼에서 사용자가 고른다. `cueSheetVersion`이 0인 큐시트는 내용이 비었을 수 있으므로 경고한다
 - **최종판 사용**: 정렬 직전에 `cueSheetVersion`을 다시 확인하고, 바뀌었으면 아이템을 다시 조회한다. 이전 판과의 차이(추가/삭제/순서 변경)를 기록한다
 - **형식 판별**과 **예정 길이**는 3.2의 대안 규칙을 따른다. 004 매칭은 `articleTitle`(공백·특수문자 정규화) + `reporterName` + 날짜로 하고, 매칭 실패는 오류가 아니다
 
@@ -564,7 +568,8 @@ storage/jobs/{job_id}/
 ## 16. 미결 사항 (확인 필요)
 1. **MARS-L 실제 응답 확인** (명세서는 받음, 3.1 참고)
    - 2026-11-18 뉴스투데이의 `detailed-item-list` 실제 응답 1건: 리포트 아이템의 `articleContent`에 `◀앵커▶`·`◀END▶` 표기가 그대로 오는지, 원고 왼쪽 칸 메모(썸네일·상단)가 `memo`에 오는지, `remark`/`cueSheetItemContent`에 "리포트" 같은 형식 정보가 오는지
-   - 인증 헤더 이름(`Mars-Secret` / `MarsL-Secret`)과 경로 접두어(`/api/external` / `/external`)
+   - ~~인증 헤더 이름과 경로 접두어~~ → 확인됨: `Mars-Secret`, `/api/external` (2026-11-19)
+   - 004 API(취재데스크)도 같은 헤더 이름(`Mars-Secret`)을 쓰는지 (명세서에는 `MarsL-Secret`)
    - 액세스 키 발급, 앱 서버에서 `api.marsl.co.kr`로의 네트워크 접근(IP 허용 목록 여부)
 2. **녹화본 샘플**: 2026-11-18 뉴스투데이 녹화본 (정렬 PoC와 첫 골든셋에 사용)
 3. **녹화본 범위**: 녹화본이 프로그램 시작부터 정확히 시작하는지, 앞뒤에 다른 방송이 붙어 있는지
