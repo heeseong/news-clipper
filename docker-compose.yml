@@ -1,0 +1,114 @@
+# News Clipper — single-server deployment (web, API, workers, DB on one host).
+#
+#   cp .env.example .env    # adjust passwords and concurrency
+#   docker compose up -d --build
+#   open http://localhost:8080
+#
+# CPU-heavy work (FFmpeg, alignment) runs in separate workers with low concurrency so the
+# web UI stays responsive on a shared server. Tune *_CONCURRENCY in .env.
+
+x-backend: &backend
+  build: ./backend
+  image: news-clipper-backend
+  restart: unless-stopped
+  environment:
+    APP_ENV: ${APP_ENV:-prod}
+    DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-newsclipper}:${POSTGRES_PASSWORD:-newsclipper}@postgres:5432/${POSTGRES_DB:-newsclipper}
+    REDIS_URL: redis://redis:6379/0
+    STORAGE_ROOT: /data/storage
+    LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    LOG_FORMAT: ${LOG_FORMAT:-json}
+    ENABLE_DEV_ENDPOINTS: ${ENABLE_DEV_ENDPOINTS:-true}
+    DUMMY_STEP_SECONDS: ${DUMMY_STEP_SECONDS:-2}
+  volumes:
+    - storage:/data/storage
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-newsclipper}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-newsclipper}
+      POSTGRES_DB: ${POSTGRES_DB:-newsclipper}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    <<: *backend
+    restart: "no"
+    command: ["alembic", "upgrade", "head"]
+
+  api:
+    <<: *backend
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  # FFmpeg: proxy, analysis, thumbnails, final render
+  worker-media:
+    <<: *backend
+    command: ["celery", "-A", "app.worker", "worker", "-Q", "media", "-c", "${MEDIA_CONCURRENCY:-2}", "-n", "media@%h"]
+    depends_on: &worker-deps
+      migrate:
+        condition: service_completed_successfully
+
+  # Script-audio forced alignment (keeps the model in memory; one at a time)
+  worker-align:
+    <<: *backend
+    command: ["celery", "-A", "app.worker", "worker", "-Q", "align", "-c", "${ALIGN_CONCURRENCY:-1}", "-n", "align@%h"]
+    depends_on: *worker-deps
+
+  # Newsroom (MARS-L) and Claude API calls, plus pipeline orchestration callbacks
+  worker-ai:
+    <<: *backend
+    command: ["celery", "-A", "app.worker", "worker", "-Q", "ai", "-c", "${AI_CONCURRENCY:-4}", "-n", "ai@%h"]
+    depends_on: *worker-deps
+
+  # YouTube uploads and status polling
+  worker-publish:
+    <<: *backend
+    command: ["celery", "-A", "app.worker", "worker", "-Q", "publish", "-c", "${PUBLISH_CONCURRENCY:-2}", "-n", "publish@%h"]
+    depends_on: *worker-deps
+
+  web:
+    build: ./frontend
+    image: news-clipper-web
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  redisdata:
+  storage:
