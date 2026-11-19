@@ -10,3 +10,10 @@ eval/data/
 
 # Local env
 .env
+.ruff_cache/
+
+# Job storage when running the backend locally
+storage/
+
+# Frontend
+node_modules/

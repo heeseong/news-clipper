@@ -5,7 +5,7 @@
 
 ## 먼저 읽을 것
 - `spec.md` — 기능 명세(v1.0). 정렬·경계 규칙의 근거는 5.5절
-- `plan.md` — 마일스톤과 진행 상태. 다음 작업은 **M0(프로젝트 기반)**
+- `plan.md` — 마일스톤과 진행 상태. M0 완료(로그인 보류), 다음 작업은 **M1(수집·프록시·신호 분석)**
 - `eval/poc/RESULTS.md` — 정렬 PoC 결과와 방송별 실패 사례
 
 ## 핵심 결정 (바꾸기 전에 사용자와 확인)
@@ -17,15 +17,25 @@
 - 외부 연동(MARS-L, Claude, YouTube)은 인터페이스 + Fake 구현을 먼저 만든다
 
 ## 저장소 구조 (현재)
+- `backend/app/core/` — 설정(`config.py`, 환경변수), JSON 로깅, DB 세션
+- `backend/app/models/` — SQLAlchemy 모델(User, ProgramProfile, Job, JobStep). 바꾸면 Alembic 마이그레이션(`backend/alembic/`)도 만든다
+- `backend/app/pipeline/` — 단계 정의(`definition.py`), 상태 전이(`orchestrator.py`, Celery 없음), Celery 태스크(`tasks.py`), 단계 처리기 등록(`steps.py`, `@register("proxy")`)
+- `backend/app/api/` — FastAPI 라우터. `backend/app/worker.py` — Celery 앱(큐 media/align/ai/publish)
 - `backend/app/newsroom/` — 원고 파서(`script_parser.py`), 큐시트 아이템 판별·제목 정리·출처 판별(`rundown.py`), 모델(`models.py`)
 - `backend/app/align/korean_text.py` — 정렬용 한글 발음 변환(숫자, 영문, 발음 사전)
-- `backend/tests/` — 단위 테스트
+- `backend/tests/` — 단위 테스트. `tests/fixtures/synthetic.py`는 FFmpeg 합성 테스트 영상(컷·무음 위치를 알고 있음)
+- `frontend/` — React + Vite + TS. `src/api/`(API 클라이언트·TanStack Query 훅), `src/pages/`
+- `docker-compose.yml` — 서버 한 대 배포(postgres, redis, migrate, api, 워커 4개, web)
 - `eval/tools/` — MARS-L 출력물(PDF) → API 형식 JSON 변환기(API 키를 받기 전 임시용), 파싱 검토 리포트 생성
 - `eval/poc/` — 정렬 PoC 스크립트(`compute_logits.py`, `align_poc.py`). M3에서 `backend/app/align/`으로 옮긴다
 
 ## 명령
 ```bash
-cd backend && python -m pytest -q          # 단위 테스트 (pydantic, pytest만 필요)
+cd backend && uv venv && uv pip install -e ".[dev]"
+cd backend && .venv/bin/python -m pytest -q   # SQLite + Celery 즉시 실행. 외부 서비스 불필요
+cd backend && .venv/bin/ruff check .
+cd frontend && npm install && npm run lint && npm run build
+docker compose up -d --build                  # 전체 스택, http://localhost:8080
 python eval/tools/marsl_pdf_export.py CUESHEET.pdf SCRIPTS.pdf eval/data/<날짜>-<프로그램>
 python eval/tools/inspect_rundown.py eval/data/<날짜>-<프로그램>
 ```
@@ -39,6 +49,7 @@ python eval/tools/inspect_rundown.py eval/data/<날짜>-<프로그램>
 - 이 저장소는 클라우드 환경 **news-clipper**에서 작업한다. Hugging Face, download.pytorch.org가 허용돼 있다
 - PyTorch는 CPU 휠을 쓴다: `uv pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu`
 - Hugging Face 모델은 `HF_HUB_DISABLE_XET=1`로 받는다. 모델은 `kresnik/wav2vec2-large-xlsr-korean`(1.2GB)
+- deb.debian.org가 막혀 있어 세션 안에서는 백엔드 Docker 이미지(FFmpeg 설치)를 빌드할 수 없다. 이미지 빌드는 CI에서 확인한다. Docker 데몬은 `dockerd`로 직접 띄워야 한다
 - `gh`는 GraphQL이 막혀 있다. PR 생성·병합은 REST(`gh api repos/heeseong/news-clipper/pulls ...`)로 한다
 
 ## PoC에서 배운 주의점 (구현 시 지킬 것)
