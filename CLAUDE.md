@@ -5,7 +5,7 @@
 
 ## 먼저 읽을 것
 - `spec.md` — 기능 명세(v1.0). 정렬·경계 규칙의 근거는 5.5절
-- `plan.md` — 마일스톤과 진행 상태. M0·M1 완료(로그인 보류), 다음 작업은 **M2(큐시트·원고 연동)**
+- `plan.md` — 마일스톤과 진행 상태. M0·M1 완료(로그인 보류), 다음 작업은 **M2(큐시트·원고 연동)**. M2 절의 **"M2 시작 가이드"**에 기존 코드와의 연결점, 남은 작업, 사용자에게 받을 것이 정리돼 있다
 - `eval/poc/RESULTS.md` — 정렬 PoC 결과와 방송별 실패 사례
 
 ## 핵심 결정 (바꾸기 전에 사용자와 확인)
@@ -54,6 +54,22 @@ python eval/tools/inspect_rundown.py eval/data/<날짜>-<프로그램>
 - Hugging Face 모델은 `HF_HUB_DISABLE_XET=1`로 받는다. 모델은 `kresnik/wav2vec2-large-xlsr-korean`(1.2GB)
 - deb.debian.org가 막혀 있어 세션 안에서는 백엔드 Docker 이미지(FFmpeg 설치)를 빌드할 수 없다. 이미지 빌드는 CI에서 확인한다. Docker 데몬은 `dockerd`로 직접 띄워야 한다
 - `gh`는 GraphQL이 막혀 있다. PR 생성·병합은 REST(`gh api repos/heeseong/news-clipper/pulls ...`)로 한다
+- `api.marsl.co.kr`은 허용 호스트에 없고 MARS-L 키도 환경에 저장돼 있지 않다. 실제 API가 필요할 때 사용자 승인을 받아 추가한다(키는 채팅으로 받지 않는다)
+- 이미지에 Python 3.13, Node 22, FFmpeg 6, PostgreSQL 16, Redis 7, Chromium(Playwright)이 있다. 환경의 설정 스크립트가 새 세션 시작 때 `backend/.venv`(uv)와 `frontend/node_modules`(npm ci)를 설치한다(2026-11-19 추가). 없으면 위 "명령"의 `uv venv`, `npm install`로 설치한다
+- 실제 워커·DB로 확인할 때 (테스트에는 필요 없음):
+  ```bash
+  P=/var/tmp/ncpg; mkdir -p $P && chown postgres $P
+  (cd /tmp && runuser -u postgres -- /usr/lib/postgresql/16/bin/initdb -D $P/data -U postgres --auth=trust -E UTF8)
+  (cd /tmp && runuser -u postgres -- /usr/lib/postgresql/16/bin/pg_ctl -D $P/data -o "-p 5432 -k /tmp" -l $P/log start)
+  psql -h localhost -U postgres -c "create user newsclipper password 'newsclipper'" -c "create database newsclipper owner newsclipper"
+  redis-server --daemonize yes
+  cd backend && .venv/bin/alembic upgrade head
+  .venv/bin/uvicorn app.main:app --port 8000 &        # STORAGE_ROOT=/var/tmp/ncstorage 권장
+  .venv/bin/celery -A app.worker worker -Q media,align,ai,publish -c 2 &
+  cd ../frontend && npx vite --port 5173 &              # /api, /media는 8000으로 프록시
+  ```
+  postgres는 root로 못 띄우므로 `runuser -u postgres`를 쓰고, 데이터 디렉터리는 scratchpad가 아니라 `/var/tmp`에 둔다(postgres 사용자가 scratchpad에 접근 못 함)
+- 브라우저 확인은 Playwright(`require('playwright')`)로 한다. 합성 테스트 녹화본은 `ffmpeg -f lavfi`로 만든다(밝기가 다른 장면, 아래 주의점)
 
 ## PoC에서 배운 주의점 (구현 시 지킬 것)
 - ctc-segmentation의 문장 구간은 앞뒤로 최대 0.5초 늘어나 있다. 첫·마지막 **글자 시각**을 쓴다
