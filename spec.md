@@ -2,12 +2,13 @@
 
 > 종합뉴스 방송 녹화본을 **큐시트·원고(MARS-L)**에 맞춰 리포트 단위로 자동 분할하고, 제목·설명·썸네일을 만든 뒤 검수를 거쳐 YouTube 등 채널에 예약 업로드하는 사내 웹 애플리케이션.
 
-- 문서 버전: v1.1 (2026-11-19)
+- 문서 버전: v1.2 (2026-11-19)
 - 변경 이력
   - v0.1: STT + LLM 기반 경계 탐지
   - v0.2: **큐시트·원고 + 원고-오디오 정렬 기반으로 전환** (STT는 보조 수단), 업로드 대상을 **리포트(R)로 한정**
   - v0.3: MARS-L 외부 API 명세 반영(3.1~3.2, 5.4). 형식(R/S)·예정 길이가 API에 없어 대안 규칙 추가
-  - v1.1: MARS-L 큐시트 목록(001)·조회(002)·상세(003) API 실제 응답 반영 (3.1, 3.2, 5.4): 경로·인증 헤더 확정, `programType` 필드, 큐시트 매칭 규칙 (3.1, 5.4)
+  - v1.2: 새 세션 인수인계용 정리. 3장을 실제 API 기준으로 재작성(004 불필요, 메모 없음), 5-1을 PoC에서 검증된 방식으로 수정, 썸네일 문구 출처, 골든셋·미결 사항 갱신
+  - v1.1: MARS-L 큐시트 목록(001)·조회(002)·상세(003) API 실제 응답 반영: 경로·인증 헤더 확정, `programType`, 큐시트 시간 공식
   - v1.0: 4차 블라인드 검증(11-05) 반영: 앵커 컷과 리드 사이에 말소리가 있으면 인사말로 보고 제외 (5-3)
   - v0.9: 3차 검증(11-04) 반영: 판정 실패 시 다음 컷부터 재정렬, 원고 없는 아이템 길이를 탐색 창에 반영 (5-2)
   - v0.8: 오정렬 판정에 길이 비율 추가, 원고-녹화본 불일치 감지(날짜 확인, 방송 단위 경고) (5.1, 5-3-1)
@@ -15,7 +16,7 @@
   - v0.6: 다른 방송사(광주MBC) 리포트는 업로드 제외 (1.4, 5.4)
   - v0.5: 2차 검증(11-02) 반영: 인사말 처리, 리드 시작이 무음에 걸릴 때 보정, 문자 단위 시각 사용, 발음 사전, 오정렬 판정 기준(5.5)
   - v0.4: 정렬 PoC 결과 반영(5.3, 5.5, 5.6). 리포트 끝은 다음 아이템의 앵커 샷 컷 기준, 컷 임계값 0.1, 프레임 단위 렌더 규칙 (eval/poc/RESULTS.md)
-- 상태: 초안 (16장 미결 사항 확인 필요)
+- 상태: 구현 기준 문서. 정렬 방식은 PoC로 검증 완료(`eval/poc/RESULTS.md`), MARS-L API는 실제 응답으로 확인 완료. 남은 확인 사항은 16장
 
 ---
 
@@ -41,7 +42,7 @@
 ### 1.4 범위
 - **업로드 대상: 큐시트 형식 `R`(리포트) 중 자사 제작 리포트만**
 - 제외: 다른 방송사(광주MBC, 여수MBC)가 만든 리포트. 우리 앵커가 리드를 읽더라도 업로드하지 않는다
-- 제외: 단신(`S`), 타이틀/주요뉴스(헤드라인)/클로징/CM 등 형식이 비어 있는 아이템. 단, 이 아이템들의 원고와 길이는 **정렬의 기준점**으로 사용한다.
+- 제외: 단신(`S`), 타이틀/주요뉴스(헤드라인)/클로징/CM 등. 단신과 다른 방송사 리포트의 원고와 길이는 **정렬의 기준점**으로 사용한다(타이틀 등 기사 없는 아이템은 API에 나오지 않는다).
 
 ### 1.5 범위 밖 (v1)
 - 생방송 스트림 실시간 분할
@@ -66,101 +67,80 @@
 
 ## 3. 입력 데이터 (MARS-L)
 
-### 3.1 MARS-L 외부 API
-출처: 「지역MBC-NRCS-B106 홈페이지 인터페이스 명세서」 V0.2 (2024.01.04)
+### 3.1 MARS-L 외부 API (실제 응답으로 확인 완료, 2026-11-19)
+명세서: 「지역MBC-NRCS-B106 홈페이지 인터페이스 명세서」 V0.2. 아래는 실제 응답 기준이며 명세서와 다른 곳은 실제 응답을 따른다.
 
-| ID | 이름 | 메서드·경로 | 용도 |
+| ID | 이름 | 요청 | 용도 |
 |---|---|---|---|
-| IF_MARSL_001 | 큐시트 목록 조회 | `GET /api/external/cuesheet/list?startDate=&endDate=` | 방송일 + 프로그램명으로 녹화본에 맞는 큐시트 찾기 |
-| IF_MARSL_002 | 큐시트 정보 조회 | `GET /api/external/cuesheet/{cueSheetId}` | 판 수(`cueSheetVersion`) 폴링 → 변경 감지 |
-| IF_MARSL_003 | 큐시트 상세(아이템) 조회 | `GET /api/external/cuesheet/{cueSheetId}/detailed-item-list` | 아이템 순서 + 원고 본문 |
-| IF_MARSL_004 | 취재데스크 기사 조회 | `GET /api/external/article/list?startDate=&endDate=&page=&size=` | 기사 형식·예정 시간 보조 정보 |
+| IF_MARSL_001 | 큐시트 목록 | `GET /api/external/cuesheet/list?startDate=2026-11-01&endDate=2026-11-01` | 방송일·프로그램으로 녹화본에 맞는 큐시트 찾기 |
+| IF_MARSL_002 | 큐시트 조회 | `GET /api/external/cuesheet/{cueSheetId}` | 판 수(`cueSheetVersion`) 확인 |
+| IF_MARSL_003 | 큐시트 상세 | `GET /api/external/cuesheet/{cueSheetId}/detailed-item-list` | 아이템 순서, 원고, 기사 형식, 예정 시간, 출처 |
+| IF_MARSL_004 | 취재데스크 기사 | `GET /api/external/article/list?...` | **사용하지 않는다** (003에 필요한 필드가 다 있다) |
 
-- 기본 URL: `https://api.marsl.co.kr`, 경로 접두어 `/api/external` (HTTPS 필수). **확인됨(2026-11-19)**: `GET https://api.marsl.co.kr/api/external/cuesheet/list?startDate=2026-11-01&endDate=2026-11-01`
-- 큐시트 조회(002): `GET https://api.marsl.co.kr/api/external/cuesheet/{cueSheetId}` **확인됨(2026-11-19)**. `data`가 객체 하나이고 필드는 목록(001)의 원소와 같다(`programType` 포함). 판 수(`cueSheetVersion`) 폴링에 쓴다
-- 큐시트 상세(003): `GET https://api.marsl.co.kr/api/external/cuesheet/{cueSheetId}/detailed-item-list` **확인됨(2026-11-19)**. 실제 응답은 명세서보다 필드가 많다(아래 "003 실제 응답")
-- 인증: 요청 헤더 `Mars-Secret: <지역사 액세스 키>`. **확인됨(001, 002, 003)**. 키는 환경변수(`MARSL_API_KEY`)로만 받고 로그·저장소에 남기지 않는다
-- 공통 응답: `{status, success, data}`. 실패 시 `{errorCode, message, details, success:false}` — 40000(잘못된 요청), 20001(권한 없음), 20000(인증 오류), 50000(시스템 오류)
+- 기본 URL `https://api.marsl.co.kr`, 경로 접두어 `/api/external`, HTTPS
+- 인증: 요청 헤더 `Mars-Secret: <지역사 액세스 키>`. 키는 환경변수 `MARSL_API_KEY`로만 받고 로그·저장소에 남기지 않는다
+- 공통 응답 `{status, success, data}`. 실패 `{errorCode, message, details, success:false}` — 40000 잘못된 요청, 20001 권한 없음, 20000 인증 오류, 50000 시스템 오류
 
-**주요 필드와 용도**
+**001 목록 / 002 조회** (002의 `data`는 001 목록의 원소 하나와 같은 형태)
 
-| API | 필드 | 용도 |
+| 필드 | 실제 값 예 | 처리 |
 |---|---|---|
-| 001/002 | `cueSheetId` | 큐시트 식별자 |
-| 001/002 | `programName`, `programType`, `broadcastDate`, `broadcastStartTime` | 녹화본과 매칭 (`programType`: `TV` / `라디오`, 명세서에 없던 필드) |
-| 001/002 | `channelCode`, `channelName` | 지역사(예: `목포` / `목포문화방송`) |
-| 001/002 | `cueSheetVersion` | 판 수. **값이 바뀌면 큐시트가 수정된 것** |
-| 001/002 | `anchor1Name`, `anchor2Name` | 메타데이터 |
-| 003 | `cueSheetItemOrderNumber` | 방송 순서 |
-| 003 | `cueSheetItemTitle`, `article.articleTitle` | 제목 |
-| 003 | `article.articleContent` | **원고 본문** (줄바꿈 `\n` 포함 텍스트) |
-| 003 | `article.reporterName` | 기자명, 사인오프 검증 |
-| 003 | `article.memo`, `cueSheetItemContent`, `remark` | 썸네일·상단 문구, 아이템 형식 후보 (실제 값 확인 필요) |
-| 004 | `ancMentCttTime`, `artclCttTime`, `artclExtTime` | 앵커 멘트·기사 예정 시간(초) |
-| 004 | `articleTypeCode`, `articleTypeCodeName` | 기사 형식(예: `typ_001` 스트레이트) |
+| `cueSheetId` | `2086539` | 큐시트 식별자 |
+| `programName` | `"뉴스데스크 "` (뒤 공백) | trim 후 프로그램 프로필 이름과 비교 |
+| `programType` | `"TV"` / `"라디오"` | 명세서에 없던 필드. **`TV`만 매칭 대상** |
+| `broadcastDate`, `broadcastStartTime` | `"2026-11-01"`, `"19:30:00"` | 매칭 키 |
+| `cueSheetVersion` | `1` (라디오는 `0`) | 판 수. 바뀌면 다시 조회. `0`은 빈 큐시트일 수 있어 경고 |
+| `channelCode`, `channelName` | `"목포"`, `"목포문화방송"` | 지역사 |
+| `broadcastEndTime`, `broadcastDurationTime` | `"2026-11-01T19:30"`, `0` | **쓰지 않는다**(종료 시각·길이가 아님) |
 
-**003 실제 응답 (2026-11-01 뉴스데스크로 확인)**
-- 아이템: `cueSheetItemId`, `cueSheetItemOrderNumber`(문자열 `"1"`), `cueSheetItemTitle`, `remark`(리포트는 `"리포트"`, 단신은 `null`), `cueSheetItemContent`(`null`)
-- `article`에 명세서의 004(취재데스크) 필드가 들어 있다: `articleId`, `ancMentCttTime`·`artclCttTime`·`artclExtTime`(초, ext는 음수 가능. **큐시트 `시간` = 세 값의 합**, 11-04 출력물과 22/22 일치), `articleTypeCode`/`articleTypeCodeName`(`typ_002` 리포트, `typ_001` 스트레이트), `originReporterName`, `channelName`·`originChannelName`, `isSameChannel`(명세서의 `sameChannel`). **004 매칭은 필요 없다**
-- **타이틀·주요뉴스·구분선처럼 기사가 없는 아이템은 응답에 없다.** 번호는 첫 기사부터 1이다(출력물에서는 타이틀이 1번). 그래서 이런 아이템의 예정 길이는 알 수 없고, 정렬은 첫 아이템 앞부분 여유(300초)와 재정렬로 처리한다
-- `memo`는 모든 아이템에서 `null`이었다. 출력물 왼쪽 칸의 썸네일·상단 문구는 API로 오지 않는다 → 썸네일 문구는 LLM 생성이나 검수자 입력으로 대신한다
-- `articleContent`는 편집기의 줄바꿈을 그대로 담는다. 단어 중간에서 끊긴 줄(`"조\n선 수군"`)과 줄 앞 공백이 있다. 파서는 문단 안의 줄을 공백으로 이어 붙인다(정렬에는 영향 없음)
-- 다른 방송사 기사는 우리 데스크가 가져와도 `isSameChannel: false`, `originChannelName: "여수"`, `originReporterName`이 원래 기자다. 제목에 `여수)`가 없을 수 있다 → 출처 판별은 이 필드를 먼저 본다
+**003 상세** (`data`는 아이템 배열)
 
-**데이터 품질 주의**
-- `programName`에 공백이 붙어 온다(`"뉴스데스크 "`, 실제 응답에서도 확인) → trim 후 비교
-- 실제 응답(001)에서 `broadcastDurationTime`은 `0`, `broadcastEndTime`은 방송일+시작 시각(`"2026-11-01T19:30"`)이었다 → **둘 다 쓰지 않는다**. 예정 총 길이는 아이템 예정 길이의 합으로 구한다
-- 같은 날짜 목록에 라디오 큐시트도 섞여 온다(`programType: "라디오"`, 시작 시각 `00:00:00`, `cueSheetVersion: 0`) → `programType == "TV"`만 매칭 대상
-- `cueSheetItemOrderNumber`가 예시는 문자열, 명세는 Integer → 둘 다 허용
-- 예시의 `broadcastEndTime`(`"2023-08-17T08:40"`)이 `broadcastDate`(08-18)와 날짜가 다름 → 신뢰하지 않음
-- 날짜 형식이 섞여 있음(`yyyy-MM-dd HH:mm:ss`, ISO) → 관대하게 파싱
-- 필드 이름 대소문자 불일치(`updateDatetime`/`updateDateTime`, `inputrUserName`/`inputUserName`) → 별칭 허용
+| 위치 | 필드 | 실제 값 예 | 처리 |
+|---|---|---|---|
+| 아이템 | `cueSheetItemId` | `32429545` | 아이템 식별자 |
+| 아이템 | `cueSheetItemOrderNumber` | `"1"` (문자열) | 방송 순서. 정수로 변환 |
+| 아이템 | `remark` | 리포트 `"리포트"`, 단신 `null` 또는 `"어깨걸이"` | 형식 판별 1순위 |
+| 아이템 | `cueSheetItemContent` | `null` | 형식 판별 보조 |
+| article | `articleId` | `14120182` | 기사 식별자 |
+| article | `articleTitle` | `"…선정(R-1)"`, 앞 공백 가능 | 제목. 접두·접미 표시 정리 |
+| article | `articleContent` | `"◀ 앵 커 ▶\n 음력 11월은…"` | **원고 본문**(3.2) |
+| article | `articleTypeCode` / `articleTypeCodeName` | `typ_002`/`리포트`, `typ_001`/`스트레이트` | 형식 판별 2순위. 실제 응답에서 `remark`와 모두 일치 |
+| article | `ancMentCttTime`, `artclCttTime`, `artclExtTime` | `21`, `92`, `-6` (초, ext는 음수 가능) | **예정 길이 = 세 값의 합**. 큐시트 출력물의 `시간`과 22/22 일치(11-04) |
+| article | `reporterName` / `originReporterName` | 데스크 / 실제 작성 기자 | 기자명은 `originReporterName` 우선 |
+| article | `channelName`, `originChannelName`, `isSameChannel` | `"목포"`, `"여수"`, `false` | **다른 방송사 판별 1순위**(명세서의 `sameChannel`) |
+| article | `memo` | 모든 아이템에서 `null` | 쓰지 않는다. 출력물 왼쪽 칸의 썸네일·상단 문구는 API로 오지 않는다 |
 
-### 3.2 큐시트 화면과 API의 차이
-큐시트 출력물(PDF)에는 있지만 API 명세에는 **없는 정보**와 그 대안:
+- **기사가 없는 아이템(타이틀, 주요뉴스, 브릿지 VCR, 구분선)은 003 응답에 없다.** 번호는 첫 기사부터 1이다(출력물에서는 타이틀이 1번). 이 아이템들의 길이는 알 수 없으므로 정렬은 첫 아이템 앞부분 여유와 재정렬로 처리한다(5-2)
+- 날짜 형식(`yyyy-MM-dd HH:mm:ss`, ISO)과 필드 이름 대소문자(`updateDatetime`/`updateDateTime`)는 관대하게 파싱한다
 
-| 큐시트 화면 | API | 대안 |
-|---|---|---|
-| 형식 `R`/`S` | 없음 | ① `remark`·`cueSheetItemContent`에 "리포트"가 오는지 확인 (화면 비고 칸에 "리포트"가 있음) ② 원고에 `◀리포트▶` 섹션과 사인오프가 있으면 R로 판별 ③ 004 API의 `articleTypeCode` 매칭 |
-| 아이템별 예정 길이(시간·합계) | 없음 (003) | ① 004 API의 `ancMentCttTime + artclCttTime`을 제목·기자·날짜로 매칭 (003 응답에 `articleId`가 없어 직접 연결 불가) ② 원고 글자 수로 낭독 시간 추정 |
-| V(송출 채널), A(오디오 소스) | 없음 | 필요 없음. 아이템 경계의 화면 컷은 영상에서 직접 검출 |
-| 원고 왼쪽 칸 메모(썸네일, 상단, 수퍼) | 불명확 | `memo` 필드 또는 `articleContent` 안의 특정 표기일 가능성. 실제 응답으로 확인 필요 |
+**판별 규칙**
+- **형식(R/S)**: `remark`/`cueSheetItemContent`에 "리포트" → `articleTypeCodeName == "리포트"` 또는 `articleTypeCode == "typ_002"` → 원고에 `◀리포트▶` 구간과 사인오프가 있음. 판별 근거를 저장하고 검수 화면에서 사람이 바꿀 수 있게 한다
+- **출처(다른 방송사)**: 하나라도 해당하면 다른 방송사 기사 → 업로드 제외, 정렬 기준점으로는 사용
+  1. `isSameChannel == false` 또는 `originChannelName != channelName` (실제 사례: 우리 데스크가 가져온 여수MBC 단신, 제목에 `여수)`가 없음)
+  2. 제목 앞머리 `방송사명)`: `광주)기대 뒤집은 KIA…`
+  3. 기자 표기의 괄호가 자사 부서가 아님: `이재원(광주)`
+  - 제외할 방송사 목록(기본 `광주`, `여수`)은 프로그램 프로필에서 설정한다
+- **예정 길이**: `ancMentCttTime + artclCttTime + artclExtTime`. 값이 없으면 원고 글자 수로 낭독 시간을 추정한다(5.7음절/초 + 문장 사이 0.35초)
 
-- **출처 판별 규칙** (하나라도 해당하면 다른 방송사 리포트 → 업로드 제외, 정렬 기준점으로는 사용):
-  - 기사의 `isSameChannel == false` 또는 `originChannelName`이 `channelName`과 다름 (003 실제 응답에서 확인, 가장 우선)
-  - 제목 앞머리가 `방송사명)` 형태: `광주)기대 뒤집은 KIA…`
-  - 기자 표기의 괄호가 자사 부서가 아님: `이재원(광주)` (자사는 `(보도부)`, `(보도국)` 등)
-  - 004 API로 매칭된 기사의 `sameChannel=false` 또는 `originChannelName`이 자사가 아님 (실제 API 확인 후 적용)
-  - 제외할 방송사 목록(기본 `광주`, `여수`)은 프로그램 프로필에서 설정한다. 판별 결과와 근거를 저장하고 검수 화면에 보여준다
-- **형식 판별 규칙** (우선순위, 003 실제 응답에서는 `remark`와 `articleTypeCodeName`이 모든 아이템에서 일치했다): `remark`/`cueSheetItemContent`의 명시적 값 → 원고 구조(`◀리포트▶` + 사인오프) → 004 매칭. 판별 결과와 근거를 저장하고, 검수 화면에서 사람이 바꿀 수 있게 한다.
-- **예정 길이**는 정렬의 대략 위치 추정(5-1)에만 쓰인다. 없어도 원고 낭독 시간 추정치로 대체할 수 있으므로 필수는 아니다.
-
-### 3.3 큐시트 화면 정보 (참고: 2026-11-18 뉴스투데이 출력물)
-| 필드 | 예 | 용도 |
-|---|---|---|
-| 프로그램명, 방송일 | 뉴스투데이, 2026-11-18 | 녹화본과 매칭하는 키 |
-| 판 수, 확정일시 | 3, 2026-11-18 06:03 | 최종판 판별 |
-| No | 1~23 | 방송 순서 |
-| 형식 | `R`(리포트), `S`(단신), 빈칸(타이틀·클로징 등) | **R만 업로드 대상** |
-| 시간 / 합계 | 03:07 / 04:07 | 예정 길이, 누적 시각 |
-| 제목 | 2028년 통합목포고 개교..기존 부지에 컨벤션센터? | 제목 기본값 |
-| V | V1 / V2 / V3 | 아이템마다 V1↔V2가 교대 → **아이템 경계에서 화면 컷 발생** |
-| 기자 | 김양훈 | 메타데이터, 사인오프 검증 |
-| 비고 | 리포트 | 형식 판별 후보 |
-
-### 3.4 원고 (아이템별)
+### 3.2 원고 (`articleContent`)
 | 요소 | 예 | 처리 |
 |---|---|---|
-| 헤더 | 제목, 기자(부서), 출고 시각, 길이 | 메타데이터 |
-| 섹션 표시 | `◀앵커▶ … ◀END▶`, `◀리포트▶ … ◀END▶` | **앵커 리드 구간과 리포트 구간 구분** |
-| 인터뷰 | `◀INT▶ 박준철 전남광주교육청 서부시설팀장` + 인터뷰 내용 | 화자 이름 줄은 발화 아님(제거), 내용은 정렬에 사용 |
-| 스탠드업 | `◀st-up▶`, `S/U` | 표시는 제거, 내용은 정렬에 사용 |
-| 연출 지시 | `(CG)`, `(화면전환)`, `*목포여자고등학교*` | 발화 아님 → 제거 |
-| 기자 소개 | "김양훈 기자가 취재했습니다." | 앵커 리드의 끝 |
-| 사인오프 | "mbc뉴스 김양훈입니다." | **리포트 클립의 끝 기준점** |
-| 왼쪽 칸 메모 | `썸네일 …`, `상단 : …`, 수퍼 자막, 인터뷰 수퍼 | **썸네일 문구, 상단 자막 → 메타데이터 후보** |
+| 섹션 표시 | `◀ 앵 커 ▶ … ◀ END ▶`, `◀ 리포트 ▶ … ◀ END ▶` (`◀ END ▶`는 생략되기도 함) | **앵커 리드와 리포트 구간 구분** |
+| 기자 소개 | "○○○ 기자입니다.", "○○○ 기자가 보도합니다/짚어봤습니다." | 앵커 리드의 끝(`intro`) |
+| 인터뷰·현장음 | `◀ INT ▶ 이름 / 직함`, `◀ ☏INT ▶`, `◀ 인터뷰 ▶`, `◀ SYNC ▶`, `◀ 현장음 ▶` + 다음 줄들의 인용 | 화자 줄은 발화 아님. 인용은 정렬에 사용. 문단이 끝나면 블록 종료. 화자 줄이 `/`로 끝나면 다음 줄까지 화자 |
+| 스탠드업 | `◀ st-up ▶`, `S/U` | 표시는 제거, 내용은 정렬에 사용 |
+| 연출 지시 | `통CG]`, `반투명CG]`, `CG`, `(CG)`, `(화면전환)`, `*수퍼*`, `[영상] 홈런`, `/`, `//` | 발화 아님 → 제거 |
+| 괄호 보충 | `오늘(11)`, `"(저희가) …"` | 자막용 보충 → 제거 |
+| 사인오프 | "MBC뉴스 ○○○입니다.", "MBC 뉴스 ○○○ 입니다", "mbc뉴스 ○○○ 기자 입니다" | **리포트 클립의 끝 기준점** |
 
-- 원고 표기는 일정하지 않다(`st-up`/`S/U`, `mbc`/`MBC`, `R]` 접두어나 `(R)` 접미어가 붙은 제목 등). 파서는 이런 변형을 허용해야 한다.
+- 원고에는 편집기의 줄바꿈이 그대로 들어 있다. 단어 중간에서 끊긴 줄(`"조\n선 수군"`)과 줄 앞 공백이 있다. 파서는 문단 안의 줄을 공백으로 이어 붙이고 문장 단위로 다시 나눈다(정렬에는 영향 없음)
+- 제목 정리: `R]`, `(R)`, `(R-1)`, `[리포트]` 제거. `기획4]`는 시리즈, `광주)`는 출처로 분리
+- 큐시트 기자(데스크)와 사인오프 기자가 다를 수 있다(`SIGNOFF_REPORTER_MISMATCH` 경고). 메타데이터에는 사인오프 기자를 쓴다
+
+### 3.3 큐시트 출력물(PDF)과의 관계
+- 출력물의 형식·시간·비고 칸은 API의 `remark`, `articleTypeCodeName`, 시간 공식으로 모두 재현된다
+- 출력물에만 있는 것: V/A 칸(필요 없음, 화면 컷은 영상에서 직접 검출), 왼쪽 칸 메모(썸네일·상단 문구, API에 없음), 기사 없는 아이템의 시간(타이틀 01:00 등)
+- `eval/tools/marsl_pdf_export.py`는 API 키가 없을 때 쓰던 임시 변환기다. 실제 API 원고와 정렬 결과가 같음을 확인했다(11-04)
 
 ---
 
@@ -201,7 +181,7 @@ DRAFT → APPROVED → RENDERING → RENDERED → UPLOADING → UPLOADED
 - 형식: MP4, MOV, MXF, MKV, TS. 최대 50GB(설정값).
 - **분할·재개 가능한 업로드(tus 프로토콜)**: 진행률, 남은 시간 표시, 끊기면 이어 올리기
 - 업로드 폼에서 입력하는 것
-  - 프로그램(프로그램 프로필에서 선택, 예: 뉴스투데이)
+  - 프로그램(프로그램 프로필에서 선택, 예: 뉴스데스크 19:30)
   - 방송일 (기본값: 오늘)
   - 입력하면 **해당 큐시트를 즉시 조회해 미리 보여준다**(판 수, 리포트 개수, 예정 총 길이). 큐시트가 없으면 경고한다.
 - 업로드 후 `ffprobe`로 검증(길이, 해상도, fps, 오디오 트랙).
@@ -228,17 +208,16 @@ DRAFT → APPROVED → RENDERING → RENDERED → UPLOADING → UPLOADED
 class NewsroomProvider(Protocol):
     def list_rundowns(self, start: date, end: date) -> list[RundownSummary]: ...   # IF_MARSL_001
     def get_rundown(self, cue_sheet_id: int) -> RundownSummary: ...                # IF_MARSL_002 (판 수 확인)
-    def get_items(self, cue_sheet_id: int) -> list[RundownItemRaw]: ...            # IF_MARSL_003 (원고 포함)
-    def list_articles(self, start: date, end: date) -> Iterator[ArticleRaw]: ...   # IF_MARSL_004 (페이지 순회)
+    def get_items(self, cue_sheet_id: int) -> list[RundownItemRaw]: ...            # IF_MARSL_003 (원고·형식·시간·출처)
 ```
-- 구현: `MarsLProvider`(httpx, 액세스 키 헤더, 타임아웃 10초, 429·5xx 지수 백오프 재시도) + `FakeNewsroomProvider`(API 응답 형식 그대로의 JSON 픽스처)
+- 구현: `MarsLProvider`(httpx, `Mars-Secret` 헤더, 타임아웃 10초, 429·5xx 지수 백오프 재시도) + `FakeNewsroomProvider`(실제 응답 형식을 따른 합성 JSON 픽스처)
 - 원본 응답 JSON은 그대로 저장한다(파서 개선 후 재파싱, 장애 분석용)
-- **큐시트 매칭**: 방송일로 목록을 조회(`startDate=endDate=방송일`) → `programType == "TV"` → `programName`(trim)이 프로그램 프로필의 이름과 같은 것 → 여러 개면 `broadcastStartTime`이 프로필의 방송 시각(예: 뉴스데스크 19:30)에 가장 가까운 것 → 그래도 애매하면 업로드 폼에서 사용자가 고른다. `cueSheetVersion`이 0인 큐시트는 내용이 비었을 수 있으므로 경고한다
-- **최종판 사용**: 정렬 직전에 `cueSheetVersion`을 다시 확인하고, 바뀌었으면 아이템을 다시 조회한다. 이전 판과의 차이(추가/삭제/순서 변경)를 기록한다
-- **형식 판별**과 **예정 길이**는 3.2의 대안 규칙을 따른다. 004 매칭은 `articleTitle`(공백·특수문자 정규화) + `reporterName` + 날짜로 하고, 매칭 실패는 오류가 아니다
+- **큐시트 매칭**: `startDate=endDate=방송일`로 목록 조회 → `programType == "TV"` → `programName`(trim)이 프로그램 프로필 이름과 같음 → 여러 개면 `broadcastStartTime`이 프로필의 방송 시각에 가장 가까운 것 → 그래도 애매하면 업로드 폼에서 사용자가 고른다
+- **최종판 사용**: 정렬 직전에 002로 `cueSheetVersion`을 다시 확인하고, 바뀌었으면 003을 다시 조회한다. 이전 판과의 차이(추가/삭제/순서 변경)를 기록한다
+- 형식·출처·예정 길이 판별은 3.1의 규칙을 따른다. 구현: `backend/app/newsroom/rundown.py`
 
 **원고 파서**
-- 입력: 원고 원문(본문 + 왼쪽 칸 메모)
+- 입력: `articleContent` (메모는 API에 없음). 구현: `backend/app/newsroom/script_parser.py`
 - 출력: `ParsedScript`
   ```json
   {
@@ -250,8 +229,7 @@ class NewsroomProvider(Protocol):
       {"kind": "interview", "speaker": "박준철 전남광주교육청 서부시설팀장", "text": "현재 파일공사를 진행하고 …"},
       {"kind": "standup", "text": "목포고와 목포여고의 통합 이전에 따라 …"},
       {"kind": "signoff", "text": "mbc뉴스 김양훈입니다."}
-    ],
-    "notes": {"thumbnail": "가칭 통합목포고 2028년 개교 / 기존 부지에는 컨벤션센터가?", "top_caption": "기존 부지에 컨벤션이?", "supers": ["목포여자고등학교", "…"]}
+    ]
   }
   ```
 - 규칙
@@ -260,18 +238,15 @@ class NewsroomProvider(Protocol):
   - 발화가 아닌 요소 제거: `◀INT▶ 이름` 줄, `/음성변조`, `(CG)`, `(화면전환)`, `*…*`, `S/U`·`st-up` 표시
   - 원고 줄바꿈으로 끊긴 문장은 이어 붙인 뒤 문장 단위로 다시 나눔
   - 사인오프는 정규식으로 검출: `(?i)(mbc|엠비씨)\s*뉴스\s*(\S+)입니다` (프로그램 프로필에서 설정 가능)
-  - 제목 정리: `R]`, `(R)`, `[리포트]` 같은 접두어·접미어 제거. 큐시트 목록의 제목은 잘려 있으므로(`…`) 원고 헤더의 전체 제목을 우선한다
+  - 제목 정리: 3.2 참고. `article.articleTitle`을 우선한다
 - 파싱 경고: 사인오프 없음, `◀END▶` 짝이 맞지 않음, 원고 길이(낭독 시간 추정)와 예정 길이 차이가 큼
 
 ### 5.5 [5] 정렬 (리포트 경계 결정)
 
-**5-1. 대략적 위치 추정 (영상 신호 + 큐시트)**
-- 프로그램 시작점을 찾는다. 녹화본 구조는 `[앞 뉴스(없을 수도 있음)] → 타이틀(MBC 뉴스데스크 광주·전남) → 주요뉴스 → 첫 앵커 샷(인사말 + 첫 리포트 리드)` 순서다
-  - v1: 타이틀 화면을 이미지 템플릿으로 찾아 탐색 시작점으로 삼는다(앞 뉴스 구간 제외)
-  - PoC에서는 시작점 검출 없이 앞 뉴스 구간부터 정렬해도 첫 리포트 리드를 정확히 찾았다. 템플릿 검출은 오정렬 방지용 안전장치다
-- 큐시트 누적 시각(합계)으로 각 아이템의 예상 시작 위치를 계산한다
-- 장면 전환 목록과 큐시트 아이템 순서를 **동적 계획법(DTW)**으로 맞춰 예상 위치를 보정한다. V1↔V2 교대 컷이 주요 기준이다
-- 목표 오차: ±20초 이내
+**5-1. 녹화본 구조와 탐색 시작점**
+- 녹화본 구조: `[앞 뉴스(없을 수도 있음, 최대 약 2분)] → 타이틀(MBC 뉴스데스크 광주·전남) → 주요뉴스 → (브릿지 VCR) → 첫 앵커 샷(인사말 + 첫 리포트 리드)`. 녹화본이 프로그램 끝까지 담기지 않을 수 있다(PoC 녹화본 5편 모두 중간에 끝남)
+- 별도의 위치 추정(DTW 등)은 하지 않는다. PoC에서는 녹화본 처음부터 5-2의 순차 정렬과 재정렬만으로 모든 리포트를 찾았다
+- (P1, 안전장치) 타이틀 화면을 이미지 템플릿으로 찾아 탐색 시작점으로 삼을 수 있다
 
 **5-2. 문장 정렬 (강제 정렬, STT 불필요)**
 - 방송 전체의 발화 원고(R과 S 모두, 순서대로)를 문장 열로 만들고, 오디오에 **CTC segmentation** 방식으로 정렬한다
@@ -280,7 +255,8 @@ class NewsroomProvider(Protocol):
   - 문장 시각은 첫 글자와 마지막 글자의 시각을 쓴다. 문장 단위 구간은 앞뒤로 최대 0.5초 늘어나 있다
   - 아이템 창은 앞 아이템의 마지막 문장부터 시작하고, 그 문장도 함께 정렬한다(경계 기준점)
   - 큐시트 순서대로 아이템마다 창(커서부터 (예정 길이 + 앞의 원고 없는 아이템 예정 길이) × 1.5 + 60초, 첫 아이템은 녹화 앞부분 여유 300초 추가)을 잡아 정렬하고, 커서를 아이템 끝으로 옮긴다.
-  - 정렬 결과가 5-3-1 판정(`LOW_CONFIDENCE`/`DURATION_MISMATCH`)에 걸리면, 창 시작을 그 뒤의 장면 컷으로 하나씩 옮겨 다시 정렬하고 처음으로 판정을 통과한 결과를 쓴다. 창 앞쪽에 다른 오디오(앞 뉴스, 주요뉴스, 브릿지 VCR)가 길게 있으면 원고 전체가 그쪽으로 몰려 정렬되기 때문이다(11-04 실제 사례: 727자가 31초에 몰림). 주요뉴스가 리드 첫 문장을 거의 그대로 읽는 경우도 이 판정으로 걸러진다 남은 오디오가 원고보다 짧으면 그 아이템은 `NOT_FOUND`(녹화본이 먼저 끝남)
+  - 정렬 결과가 5-3-1 판정(`LOW_CONFIDENCE`/`DURATION_MISMATCH`)에 걸리면, 창 시작을 그 뒤의 장면 컷으로 하나씩 옮겨 다시 정렬하고 처음으로 판정을 통과한 결과를 쓴다. 창 앞쪽에 다른 오디오(앞 뉴스, 주요뉴스, 브릿지 VCR)가 길게 있으면 원고 전체가 그쪽으로 몰려 정렬되기 때문이다(11-04 실제 사례: 727자가 31초에 몰림). 주요뉴스가 리드 첫 문장을 거의 그대로 읽는 경우도 이 판정으로 걸러진다
+  - 남은 오디오가 원고보다 짧으면 그 아이템은 `NOT_FOUND`(녹화본이 먼저 끝남)
   - 문장마다 `start`, `end`, `score`(정렬 신뢰도)를 저장한다
 - 리포트 클립 경계
   - **시작** = 앵커 리드 첫 문장의 시작
@@ -294,7 +270,7 @@ class NewsroomProvider(Protocol):
 - 단, 그 컷과 리드 직전 무음 사이에서 음향 모델이 음절 4개 이상을 들으면 인사말로 보고 컷을 쓰지 않는다(아래 무음 규칙 적용). 인사말은 와이드 샷에서 시작해 앵커 샷 컷 뒤까지 이어질 수 있다(11-05, 11-11). 음량만으로 판단하면 음악도 말소리로 잡히므로 음절 수로 판단한다
 - 그런 컷이 없으면(앵커가 인사말을 하고 같은 샷에서 리드를 읽는 경우 등) 리드 직전 무음 구간 안(무음 끝 - 0.5초)에서 시작한다. 인사말은 클립에 넣지 않는다
 - 끝: 다음 아이템 리드 시작 기준 같은 방식으로 찾은 컷 - ½프레임 (5-2). 없으면 사인오프 끝 + 0.4초
-- PoC 결과: 방송 2편, 리포트 8건, 경계 16개 모두 기준과 일치 (eval/poc/RESULTS.md)
+- PoC 결과: 방송 4편, 리포트 17건, 경계 34개 모두 기준과 일치 (`eval/poc/RESULTS.md`)
 
 **5-3-1. 오정렬 판정**
 - 아이템의 문장 점수 중앙값이 -5 미만이거나, 점수 -5 미만 문장이 30%를 넘으면 `LOW_CONFIDENCE`
@@ -307,16 +283,17 @@ class NewsroomProvider(Protocol):
 **5-4. 검증 및 경고 플래그**
 | 조건 | 플래그 |
 |---|---|
-| 경계 문장 정렬 신뢰도가 기준 미만 | `LOW_CONFIDENCE` |
+| 문장 점수 중앙값 < -5 또는 -5 미만 문장 30% 초과 (5-3-1) | `LOW_CONFIDENCE` |
 | 클립 길이가 큐시트 예정 길이와 ±20% 이상 차이 | `DURATION_MISMATCH` |
-| 해당 리포트 문장이 정렬되지 않음 | `NOT_FOUND` (방송 중 빠짐 가능성) |
+| 해당 리포트 문장이 정렬되지 않음, 또는 녹화본이 먼저 끝남 | `NOT_FOUND` |
+| 리드 첫 글자가 무음 안에 정렬됨(원고와 다르게 읽은 첫머리) | `LEAD_ONSET_IN_SILENCE` |
 | 큐시트 순서와 다른 위치에서 검출 | `ORDER_CHANGED` |
 | 인접 클립과 구간이 겹침 | `OVERLAP` |
 | 원고에 사인오프 없음 | `NO_SIGNOFF` |
 
 **5-5. 보조 수단: 부분 STT (선택)**
 - `LOW_CONFIDENCE`나 `NOT_FOUND` 아이템에 한해 해당 구간(±60초)만 STT로 받아쓰고, 원고와 텍스트 유사도로 매칭해 위치를 찾는다
-- `STTProvider` 인터페이스로 추상화한다(로컬 Whisper 또는 클라우드 API). v1에서는 꺼 두고 PoC 결과에 따라 사용 여부를 정한다
+- `STTProvider` 인터페이스로 추상화한다(로컬 Whisper 또는 클라우드 API). v1에서는 만들지 않는다. PoC에서 강제 정렬만으로 충분했다
 
 ### 5.6 [6] 영상 분할
 - **6-a. 클립 후보 (자동, 검수 전)**: 큐시트 `R` 아이템마다 Clip(DRAFT)을 만들고 구간(`start`, `end`)만 저장한다. 미리보기는 프록시의 해당 구간을 재생한다.
@@ -335,7 +312,7 @@ class NewsroomProvider(Protocol):
 | 제목 | 원고 헤더의 전체 제목(접두어 정리) | 대안 제목 2개 (YouTube 100자 제한, 권장 40~60자, 과장·낚시성 표현 금지) |
 | 설명 | 앵커 리드 + 템플릿 꼬리말(기자명, 방송일, 프로그램, 채널 정보) | 리포트 본문 2~3문장 요약 |
 | 태그 | 프로그램 기본 태그 + 기자명 + 지역명 | 원고 기반 키워드 10개 이내, 해시태그 3개 이내 |
-| 썸네일 문구 | 원고 메모의 `썸네일` 항목 | 없을 때만 `상단` 자막이나 제목에서 15자 이내 문구 생성 |
+| 썸네일 문구 | 없음 (API에 메모가 없다) | 제목·리드에서 15자 이내 문구 2~3개 생성, 검수자가 선택·수정 |
 
 - 사실성 가드레일: LLM 결과에 나온 고유명사·숫자가 원고에 있는지 검사하고, 없으면 경고 표시
 - LLM에 보내는 데이터는 **원고 텍스트뿐**이다(오디오·영상은 외부로 보내지 않는다)
@@ -459,12 +436,12 @@ storage/jobs/{job_id}/
 | 엔티티 | 주요 필드 |
 |---|---|
 | User | id, email, name, role, password_hash |
-| ProgramProfile | id, name, newsroom_program_id, audio_track, signoff_pattern, title_cleanup_rules, description_footer, default_tags, thumbnail_template(JSON), default_channels |
+| ProgramProfile | id, name(MARS-L `programName`), broadcast_time(예: 19:30), audio_track, signoff_pattern, excluded_sources(기본 광주·여수), pronunciations(발음 사전), description_footer, default_tags, thumbnail_template(JSON), default_channels |
 | Channel | id, platform, name, remote_channel_id, oauth_token(encrypted), quota_used_today |
 | Job | id, program_id, broadcast_date, status, current_step, error, source_path, source_hash, duration, fps, width, height, created_by |
 | JobStep | id, job_id, step, status, started_at, finished_at, attempts, error |
-| Rundown | id, job_id, newsroom_rundown_id, edition(판 수), confirmed_at, fetched_at, raw(JSONB) |
-| RundownItem | id, rundown_id, item_no, type(R/S/null), source(타 방송사명 또는 null), source_reason, upload(bool), title, reporter, planned_duration, cumulative, video_channel(V), audio_source(A), note, parsed_script(JSONB), parse_warnings[] |
+| Rundown | id, job_id, cue_sheet_id, program_name, program_type, broadcast_date, broadcast_start_time, version(판 수), fetched_at, raw(JSONB) |
+| RundownItem | id, rundown_id, item_no, cue_sheet_item_id, article_id, article_type, type(R/S/OTHER), type_reason, source(타 방송사명 또는 null), source_reason, upload(bool), title_raw, title, series, reporter, signoff_reporter, planned_seconds, remark, parsed_script(JSONB), parse_warnings[], raw(JSONB) |
 | AlignedSentence | id, rundown_item_id, seq, section(lead/report), kind, text, start_sec, end_sec, score |
 | Clip | id, job_id, rundown_item_id, start_sec, end_sec, start_snap, end_snap, confidence, flags[], status, render_path, locked_by, locked_at |
 | ClipMetadata | clip_id, title, title_candidates[], description, tags[], hashtags[], thumbnail_text, privacy, publish_at |
@@ -520,14 +497,15 @@ storage/jobs/{job_id}/
 ## 10. 오류 처리 원칙
 - 단계가 실패하면 Job은 `FAILED(step)`이 되고, 이전 단계 산출물은 보존한 채 해당 단계부터 재시도한다.
 - 큐시트를 찾지 못하면 업로드는 받되 작업은 `WAITING_RUNDOWN` 상태로 두고, 큐시트가 등록되면 이어서 진행한다(수동 재조회 버튼 제공).
-- 원고가 없는 리포트는 5-1의 대략 위치만으로 클립을 만들고 `LOW_CONFIDENCE` 플래그를 단다.
+- 원고가 없거나 정렬 판정에 실패한 리포트는 자동 클립을 만들지 않고 `NOT_FOUND`/`LOW_CONFIDENCE`로 표시해 검수자가 직접 구간을 지정한다.
 - 외부 API 오류(MARS-L, Claude, YouTube) 중 재시도할 수 있는 것(429, 5xx, 타임아웃)은 지수 백오프로 재시도한다.
 - LLM 응답이 스키마와 맞지 않으면 검증 오류를 넣어 1회 재요청한다. 그래도 실패하면 원고 기반 기본값만 쓰고 진행한다(작업을 실패시키지 않음).
 
 ---
 
 ## 11. 품질 평가
-- **골든셋**: 녹화본 + 큐시트 + 원고 + 사람이 표시한 리포트 경계. 첫 골든셋은 **2026-11-18 뉴스투데이**(리포트 5건)
+- **골든셋**: 녹화본 + 큐시트·원고 + 사람이 표시한 리포트 경계(`ground_truth.json`). 현재 4편: 2026-11-02, 11-04, 11-05, 11-11 뉴스데스크(업로드 대상 리포트 17건, 경계 34개). 불일치 시험용으로 11-03 큐시트 + 11-04 녹화본. 실제 자료는 저장소에 넣지 않으므로 회귀 확인 때 다시 받는다
+- 새 방송으로 검증할 때는 정답을 먼저 정하고(블라인드) 결과를 본다
 - 지표
   - 경계 정확도: |예측 − 정답| ≤ 0.5초 비율, 평균 절대 오차 (시작·끝 별도)
   - 리포트 검출률 / 오검출 수
@@ -561,7 +539,8 @@ storage/jobs/{job_id}/
 
 ## 14. 가정
 - 녹화본은 방송 완제품(자막·그래픽 포함)이며, 잘라서 바로 게시할 수 있다.
-- 녹화본 1개에는 프로그램 1회분이 들어 있다. 앞뒤 여유 구간(이전 프로그램, 광고)이 있을 수 있다.
+- 녹화본 1개에는 프로그램 1회분이 들어 있다. 앞에 다른 뉴스가 붙어 있을 수 있고(최대 약 2분), 프로그램 끝까지 담기지 않을 수 있다.
+- 녹화본 파일 이름에 방송일이 들어 있다(`CT_V…_20261104_….mp4`).
 - 원고의 발화 내용은 실제 방송과 대부분 일치한다(애드리브나 사소한 수정은 허용).
 - 업로드 대상 YouTube 채널은 인증된 채널이다(커스텀 썸네일 가능).
 - 저작권·초상권(음성변조, 모자이크 등) 문제는 방송 단계에서 처리됐다고 보고, 최종 판단은 검수자가 한다.
@@ -575,17 +554,16 @@ storage/jobs/{job_id}/
 | 2026-11-18 | STT 대신 큐시트·원고 + 원고-오디오 강제 정렬. STT는 선택적 보조 수단 |
 | 2026-11-18 | 업로드 대상은 리포트(R)만. 단신·헤드라인·타이틀·클로징 제외 |
 | 2026-11-18 | 다른 방송사(광주MBC, 여수MBC) 리포트는 업로드 제외 |
+| 2026-11-18 | 리포트 클립 = 리드 첫 문장(앵커 인사말 제외) ~ 다음 아이템 앵커 샷 컷. 정렬 판정에 실패하면 자동으로 자르지 않는다 |
+| 2026-11-19 | MARS-L 001·002·003만 사용(004 불필요). 예정 길이 = `ancMentCttTime + artclCttTime + artclExtTime` |
+| 2026-11-19 | 썸네일 문구는 API에 없으므로 LLM 후보 + 검수자 입력 |
 
 ## 16. 미결 사항 (확인 필요)
-1. **MARS-L 실제 응답 확인** (명세서는 받음, 3.1 참고)
-   - 2026-11-18 뉴스투데이의 `detailed-item-list` 실제 응답 1건: 리포트 아이템의 `articleContent`에 `◀앵커▶`·`◀END▶` 표기가 그대로 오는지, 원고 왼쪽 칸 메모(썸네일·상단)가 `memo`에 오는지, `remark`/`cueSheetItemContent`에 "리포트" 같은 형식 정보가 오는지
-   - ~~인증 헤더 이름과 경로 접두어~~ → 확인됨: `Mars-Secret`, `/api/external` (2026-11-19)
-   - ~~`articleContent` 표기, `memo`, `remark`~~ → 확인됨(003): 표기 그대로, `memo`는 비어 있음, `remark`에 "리포트"
-   - ~~큐시트 `시간` 공식~~ → 확인됨: `ancMentCttTime + artclCttTime + artclExtTime` (11-04, 22/22)
-   - 004 API(취재데스크)도 같은 헤더 이름(`Mars-Secret`)을 쓰는지 (명세서에는 `MarsL-Secret`)
-   - 액세스 키 발급, 앱 서버에서 `api.marsl.co.kr`로의 네트워크 접근(IP 허용 목록 여부)
-2. **녹화본 샘플**: 2026-11-18 뉴스투데이 녹화본 (정렬 PoC와 첫 골든셋에 사용)
-3. **녹화본 범위**: 녹화본이 프로그램 시작부터 정확히 시작하는지, 앞뒤에 다른 방송이 붙어 있는지
-4. **대상 프로그램**: 뉴스투데이 외에 어떤 프로그램(예: 저녁 종합뉴스)을 처리하는지, 하루 몇 회인지 → YouTube 할당량 증설 규모 결정
-5. **제목 정책**: 원고 제목을 그대로 쓸지, 유튜브용으로 다듬은 제목을 기본으로 할지
-6. **카카오/기타 SNS**: 구체적인 대상 서비스와 공개 API 제공 여부
+확인 완료: MARS-L 경로·인증·응답 형식, 원고 표기, 형식 판별, 시간 공식, 출처 필드, 녹화본 구조(앞 뉴스, 인사말, 브릿지)
+
+1. **앱 서버의 MARS-L 접근**: 운영 서버에서 `api.marsl.co.kr`로 접근할 수 있는지(IP 허용 목록 등). 액세스 키는 발급됨
+2. **녹화본 입수 방식과 화질**: PoC 녹화본은 320×240 프록시였다. 운영에서 받을 원본(해상도, 코덱, 파일 이름 규칙, 프로그램 끝까지 녹화되는지)
+3. **대상 프로그램과 횟수**: 뉴스데스크 외에 처리할 프로그램(뉴스투데이 등)과 하루 업로드 건수 → YouTube 할당량 증설 규모
+4. **제목 정책**: 원고 제목을 그대로 쓸지, 유튜브용으로 다듬은 제목을 기본으로 할지
+5. **카카오/기타 SNS**: 구체적인 대상 서비스와 공개 API 제공 여부
+6. **아직 검증하지 않은 경우**: 마지막 리포트가 클로징·광고 직전에 오는 경우(녹화본이 모두 중간에 끝나 시험하지 못함)
