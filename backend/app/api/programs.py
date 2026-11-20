@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from app.api.deps import DbSession
 from app.models import ProgramProfile
+from app.models.program import DEFAULT_DEDUPE_PROGRAM
 from app.schemas.program import ProgramIn, ProgramOut
 
 router = APIRouter(prefix="/api/programs", tags=["programs"])
@@ -29,6 +30,10 @@ def create_program(body: ProgramIn, db: DbSession) -> ProgramProfile:
     program = ProgramProfile(name=name, broadcast_time=body.broadcast_time, audio_track=body.audio_track)
     if body.excluded_sources is not None:
         program.excluded_sources = _sources(body.excluded_sources)
+    if body.dedupe_program is not None:
+        program.dedupe_program = body.dedupe_program.strip() or None
+    else:
+        program.dedupe_program = DEFAULT_DEDUPE_PROGRAM.get(name)
     db.add(program)
     db.commit()
     return program
@@ -44,6 +49,8 @@ def update_program(program_id: int, body: ProgramIn, db: DbSession) -> ProgramPr
     program.audio_track = body.audio_track
     if body.excluded_sources is not None:
         program.excluded_sources = _sources(body.excluded_sources)
+    if body.dedupe_program is not None:
+        program.dedupe_program = body.dedupe_program.strip() or None
     if body.pronunciations is not None:
         program.pronunciations = {k.strip(): v.strip() for k, v in body.pronunciations.items() if k.strip()}
     db.commit()

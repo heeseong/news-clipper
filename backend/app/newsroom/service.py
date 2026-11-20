@@ -19,6 +19,7 @@ from app.models import AlignedSentence, Clip, Job, ProgramProfile, Rundown, Rund
 from app.models.base import utcnow
 from app.storage import JobFiles
 
+from . import dedupe
 from . import rundown as rd
 from .matching import MatchResult, match_rundown, version_warnings
 from .models import ItemType
@@ -37,12 +38,18 @@ class ProgramInfo:
     name: str | None
     broadcast_time: time | None
     excluded_sources: list[str] | None  # None = default (광주, 여수)
+    dedupe_program: str | None = None  # leave out what this program aired the previous day
 
     @classmethod
     def of(cls, program: ProgramProfile | None) -> ProgramInfo:
         if program is None:
             return cls(None, None, None)
-        return cls(program.name, program.broadcast_time, list(program.excluded_sources or []))
+        return cls(
+            program.name,
+            program.broadcast_time,
+            list(program.excluded_sources or []),
+            program.dedupe_program,
+        )
 
 
 @dataclass
@@ -52,6 +59,36 @@ class FetchedRundown:
     items: list[ParsedItem]
     match: MatchResult
     warnings: list[str] = field(default_factory=list)
+    # The previous-day cue sheet the items were compared with (dedupe), raw: {"rundown", "items"}.
+    compared: dict[str, Any] | None = None
+
+
+def exclude_previous_broadcast(
+    provider: NewsroomProvider,
+    broadcast_date: date,
+    program: ProgramInfo,
+    raw_items: list[dict[str, Any]],
+    items: list[ParsedItem],
+) -> tuple[dict[str, Any] | None, list[str]]:
+    """Leave out items that `program.dedupe_program` aired the previous day (dedupe.py).
+
+    Returns the compared cue sheet (raw) and warnings. A missing previous cue sheet only warns:
+    nothing is left out then (every clip is reviewed before upload anyway). Transient newsroom
+    errors propagate so the step is retried.
+    """
+    if not program.dedupe_program:
+        return None, []
+    day = dedupe.previous_day(broadcast_date)
+    label = f"{day:%m-%d} {program.dedupe_program}"
+    match = match_rundown(provider.list_rundowns(day, day), program.dedupe_program)
+    if match.chosen is None and match.candidates:
+        match.chosen = max(match.candidates, key=lambda s: s.version)  # several: the latest edition
+    if match.chosen is None:
+        return None, [f"{label} 큐시트를 찾지 못해 이미 방송된 기사를 빼지 못했습니다 ({match.reason})"]
+    prev_raw = provider.get_items(match.chosen.cue_sheet_id)
+    prev_items = parse_items(prev_raw, None)
+    dedupe.exclude_aired(raw_items, items, dedupe.aired_items(prev_raw, prev_items), label)
+    return {"rundown": match.chosen.raw, "items": prev_raw}, []
 
 
 def find_rundown(
@@ -102,12 +139,13 @@ def fetch(
     summary = provider.get_rundown(match.chosen.cue_sheet_id)
     raw_items = provider.get_items(summary.cue_sheet_id)
     items = parse_items(raw_items, program.excluded_sources)
-    warnings = [*version_warnings(summary), *item_warnings(items)]
+    compared, dedupe_warnings = exclude_previous_broadcast(provider, broadcast_date, program, raw_items, items)
+    warnings = [*version_warnings(summary), *item_warnings(items), *dedupe_warnings]
     if summary.broadcast_date and summary.broadcast_date != broadcast_date:
         warnings.append(
             f"큐시트 방송일({summary.broadcast_date.isoformat()})이 작업의 방송일({broadcast_date.isoformat()})과 다릅니다"
         )
-    return FetchedRundown(summary, raw_items, items, match, warnings)
+    return FetchedRundown(summary, raw_items, items, match, warnings, compared)
 
 
 # --- storing -------------------------------------------------------------------------------------
@@ -154,6 +192,7 @@ def _db_item(item: ParsedItem) -> RundownItem:
         source=item.source,
         source_reason=(item.source_reason or None),
         upload=item.upload,
+        dedupe_note=item.dedupe_note,
         title=item.title.clean,
         title_raw=item.title.raw,
         series=item.title.series,
@@ -174,6 +213,7 @@ def write_files(job_id: int, fetched: FetchedRundown) -> None:
         "fetched_at": utcnow().isoformat(),
         "rundown": fetched.summary.raw,
         "items": fetched.raw_items,
+        "compared": fetched.compared,
     }
     tmp = files.rundown.with_suffix(".tmp")
     tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -212,7 +252,7 @@ def store(session: Session, job: Job, fetched: FetchedRundown) -> Rundown:
     rundown.confirmed_at = s.updated_at
     rundown.fetched_at = utcnow()
     rundown.match_reason = fetched.match.reason[:255]
-    rundown.raw = {"rundown": s.raw, "items": fetched.raw_items}
+    rundown.raw = {"rundown": s.raw, "items": fetched.raw_items, "compared": fetched.compared}
     rundown.warnings = list(fetched.warnings)
     if rundown.items:
         # Results that hang off the old items (alignment, clips) are redone by the align step.
@@ -236,21 +276,30 @@ def store(session: Session, job: Job, fetched: FetchedRundown) -> Rundown:
     return rundown
 
 
-def count_items(types: list[str], uploads: list[bool]) -> dict[str, Any]:
-    """Counts for the preview and the job page; `types` are R / S / OTHER per item."""
-    content = [u for t, u in zip(types, uploads, strict=True) if t in (ItemType.REPORT, ItemType.BRIEF)]
+def count_items(types: list[str], uploads: list[bool], aired: list[bool] | None = None) -> dict[str, Any]:
+    """Counts for the preview and the job page; `types` are R / S / OTHER per item, `aired` marks
+    items left out because another program already aired them."""
+    aired = aired or [False] * len(types)
+    content = [
+        (u, a) for t, u, a in zip(types, uploads, aired, strict=True) if t in (ItemType.REPORT, ItemType.BRIEF)
+    ]
     return {
         "items": len(types),
         "reports": sum(t == ItemType.REPORT for t in types),
         "briefs": sum(t == ItemType.BRIEF for t in types),
         "uploads": sum(uploads),
-        "excluded": sum(1 for u in content if not u),  # other stations' reports and briefs
+        "aired": sum(1 for u, a in content if a),  # already aired (e.g. previous day's 뉴스데스크)
+        "excluded": sum(1 for u, a in content if not u and not a),  # other stations' reports and briefs
     }
 
 
 def summarize(items: list[ParsedItem]) -> dict[str, Any]:
     planned = [i.planned_seconds for i in items if i.planned_seconds]
     return {
-        **count_items([str(i.item_type) for i in items], [i.upload for i in items]),
+        **count_items(
+            [str(i.item_type) for i in items],
+            [i.upload for i in items],
+            [not i.upload and bool(i.dedupe_note) for i in items],
+        ),
         "planned_total_seconds": sum(planned) if planned else None,
     }

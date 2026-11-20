@@ -41,9 +41,13 @@ def preview_rundown(
         match = match_rundown(day, info.name, info.broadcast_time, cue_sheet_id)
         counts, warnings = None, list(match.warnings)
         if match.chosen is not None:
-            items = service.parse_items(provider.get_items(match.chosen.cue_sheet_id), info.excluded_sources)
+            raw_items = provider.get_items(match.chosen.cue_sheet_id)
+            items = service.parse_items(raw_items, info.excluded_sources)
+            _, dedupe_warnings = service.exclude_previous_broadcast(
+                provider, broadcast_date, info, raw_items, items
+            )
             counts = RundownCounts(**service.summarize(items))
-            warnings += service.item_warnings(items)
+            warnings += service.item_warnings(items) + dedupe_warnings
     except NewsroomError as e:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"큐시트를 조회하지 못했습니다: {e}") from e
     return RundownPreviewOut(

@@ -355,7 +355,7 @@ def test_preview_api(api):
     body = r.json()
     assert body["matched"]["cue_sheet_id"] == 5001 and body["matched"]["version"] == 3
     assert body["counts"] == {
-        "items": 7, "reports": 5, "briefs": 2, "uploads": 6, "excluded": 1, "planned_total_seconds": 610
+        "items": 7, "reports": 5, "briefs": 2, "uploads": 6, "aired": 0, "excluded": 1, "planned_total_seconds": 610
     }
     assert [d["cue_sheet_id"] for d in body["day_rundowns"]] == [5001, 5002]  # radio left out
     assert not body["ambiguous"] and body["warnings"] == []
@@ -364,7 +364,7 @@ def test_preview_api(api):
     assert none["matched"] is None and none["counts"] is None and "없습니다" in none["reason"]
 
     picked = api.get("/api/newsroom/rundowns", params={"date": "2026-11-02", "cue_sheet_id": 5002}).json()
-    assert picked["matched"]["program_name"] == "뉴스투데이" and picked["counts"]["uploads"] == 2
+    assert picked["matched"]["program_name"] == "뉴스투데이" and picked["counts"]["uploads"] == 3  # no program: no comparison
 
 
 def test_preview_api_newsroom_down(api, fake):

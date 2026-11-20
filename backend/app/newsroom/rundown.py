@@ -24,6 +24,9 @@ EXCLUDED_SOURCES = ("광주", "여수")
 # Department names that mean "our own newsroom" in reporter labels such as 홍길동(보도부).
 OWN_DEPARTMENTS = ("보도부", "보도국", "취재부", "편집부", "영상취재부")
 
+# Headline segments (주요뉴스) can come as a straight article; they are not uploaded but their
+# script still anchors the alignment.
+HEADLINE_TITLE_RE = re.compile(r"주요\s*뉴스|헤드라인")
 _REPORT_MARK_RE = re.compile(r"^\s*R\s*\]\s*|\s*\(R(?:-\d+)?\)\s*$|^\s*\[?리포트\]\s*")
 _SERIES_RE = re.compile(r"^\s*\[?(?P<series>[^\[\]\s]{1,10})\]\s*")
 _STATION_RE = re.compile(r"^\s*(?P<station>[가-힣]{2,4})\)\s*")
@@ -193,6 +196,8 @@ def build_item(
     item_type, reason = classify(
         raw.get("remark"), raw.get("cueSheetItemContent"), script, article_type, article.get("articleTypeCode")
     )
+    if HEADLINE_TITLE_RE.search(title_raw):
+        item_type, reason = ItemType.OTHER, f"headline title ({title_raw.strip()[:40]})"
     # originReporterName is the author; reporterName can be the desk that imported the article.
     reporter, unit = split_reporter(article.get("originReporterName") or article.get("reporterName"))
     title = clean_title(title_raw)
