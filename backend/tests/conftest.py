@@ -41,6 +41,18 @@ def app_env(db_url: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Ite
     celery_app.conf.task_always_eager = True
     celery_app.conf.task_eager_propagates = True
 
+    # Never load the real acoustic model in tests: the align step hears silence.
+    from app.align import acoustic
+    from tests.fixtures.logprobs import silent_logprobs
+
+    def fake_logprobs(wav, model_id, **kw):
+        import wave
+
+        with wave.open(str(wav)) as w:
+            return silent_logprobs(w.getnframes() / w.getframerate())
+
+    monkeypatch.setattr(acoustic, "compute_logprobs", fake_logprobs)
+
     engine = db.get_engine()
     db.Base.metadata.drop_all(engine)
     db.Base.metadata.create_all(engine)

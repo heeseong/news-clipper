@@ -5,7 +5,7 @@ jobs/{job_id}/source/original.{ext}
 jobs/{job_id}/source/probe.json
 jobs/{job_id}/proxy/proxy.mp4, sprite.jpg, sprite.json, waveform.json
 jobs/{job_id}/audio/align.wav
-jobs/{job_id}/analysis/scenes.json, silences.json
+jobs/{job_id}/analysis/scenes.json, silences.json, logprobs.npz, alignment.json
 jobs/{job_id}/newsroom/rundown.json, scripts/{item_no}.json
 """
 
@@ -68,6 +68,16 @@ class JobFiles:
     @property
     def silences(self) -> Path:
         return self.dir / "analysis" / "silences.json"
+
+    @property
+    def logprobs(self) -> Path:
+        """Acoustic model output for align.wav (cache: computing it takes minutes)."""
+        return self.dir / "analysis" / "logprobs.npz"
+
+    @property
+    def alignment(self) -> Path:
+        """Item alignments and clip boundaries (debugging, eval/tools/score_alignment.py)."""
+        return self.dir / "analysis" / "alignment.json"
 
     @property
     def rundown(self) -> Path:

@@ -15,6 +15,7 @@ from sqlalchemy import (
     Text,
     Time,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -81,5 +82,11 @@ class RundownItem(Base):
     remark: Mapped[str | None] = mapped_column(String(255))
     parsed_script: Mapped[dict[str, Any] | None] = mapped_column(JSON)  # ParsedScript
     parse_warnings: Mapped[list[str]] = mapped_column(JSON, default=list)
+    # Alignment (align step): ALIGNED / NOT_FOUND / NO_SCRIPT, None until aligned.
+    align_status: Mapped[str | None] = mapped_column(String(16))
+    aligned_start: Mapped[float | None] = mapped_column(Float)  # first sentence onset
+    aligned_end: Mapped[float | None] = mapped_column(Float)  # last sentence offset
+    align_score: Mapped[float | None] = mapped_column(Float)  # median sentence score
+    align_flags: Mapped[list[str]] = mapped_column(JSON, default=list, server_default=text("'[]'"))
 
     rundown: Mapped[Rundown] = relationship(back_populates="items")

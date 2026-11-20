@@ -177,3 +177,85 @@ ffmpeg -i DATA/recording.mp4 -an -vf "select='gt(scene,0.1)',showinfo" -f null -
   | grep -o "pts_time:[0-9.]*" | cut -d: -f2 > DATA/scenes_ff10.txt
 python eval/poc/align_poc.py DATA
 ```
+
+## 2026-11-16 뉴스데스크 (golden set #5, blind, service code)
+
+First broadcast run through the service alignment (`backend/app/align`, M3) instead of the PoC
+script, with the real MARS-L API cue sheet (#2087663, 25 items) and no tuning.
+Recording 20:12, 320x240, 29.97 fps; it starts with ~98 s of another newscast, then headlines
+(~98-160 s), and ends during item 14 (the cue sheet plans 22:15). 5 upload reports (1, 3, 4, 5, 6).
+Log-probs: 252 s for 20.2 min of audio (4 cores).
+
+Reference labelled before running (`ground_truth.json`): scene cuts checked on frames, lead and
+sign-off positions from the model's greedy transcript (no script) and silencedetect. Report 1's
+greeting ("…목포MBC 뉴스데스크입니다", 161.4-163.6 s) starts over the studio wide shot and the anchor
+cut (162.46 s) falls inside it, as on 11-05: its reference is a range, the silence between the
+greeting and the lead (163.606-164.582 s). `score_alignment.py` gained range references for this.
+
+| Report | Clip start | Clip end | Verdict |
+|---|---|---|---|
+| 1 | 164.082 (in the silence after the greeting) | S2 anchor cut -½ frame | ok |
+| 3, 4, 5, 6 | anchor cut +1 frame | next anchor cut -½ frame | ok |
+
+**10/10 boundaries correct on the first (blind) run**; sentence-score medians -2.6 to -3.0 for the
+reports. Distracting cuts next to the right ones were handled (292.8 inside the previous brief's
+footage, 409.8 and 737.4 footage cuts around the sign-off).
+
+Observations (briefs only, no clip affected; rules not changed):
+- Brief 12: LOW_CONFIDENCE (median -4.2, 50 % below -5) on number-heavy sentences. `5.8%` is
+  spelled 오점팔, the anchor reads [오쩜팔] (the model hears 쩜). A decimal-point reading rule may help.
+- Brief 13 was placed in the last 10 s of the recording (flagged LOW_CONFIDENCE + DURATION_MISMATCH)
+  though it is at 1127-1157 s; aligned alone in [1124, 1160] it scores -2.6 to -3.0. Its window
+  runs past the program into ~25 s of unrelated audio at the end of the recording (1186-1212 s),
+  and the text is crammed there: the same effect as the headline cramming of 11-04, at the end of
+  the window. Brief 14 (in the recording, 1161-1183 s) became NOT_FOUND after it. The retry from
+  later cuts does not help here because every retry window also reaches the end of the recording.
+
+## 2026-11-19 뉴스데스크 (golden set #6, blind, service code)
+
+Same procedure as 11-16. Cue sheet #2087976 (2판, 23 items) from the API; recording 21:13,
+~98 s of another newscast, headlines until ~151 s, ends after item 15. 5 upload reports
+(1, 2, 4, 5, 6). Log-probs: 182 s for 21.2 min.
+
+- Report 1: again a greeting begun over the studio wide shot with the anchor cut (153.52 s)
+  inside it; reference = silence between greeting and lead (154.215-155.152 s).
+- Report 4's script has no ◀리포트▶/◀END▶ markers (parse warning NO_REPORT_SECTION); the sign-off
+  is still found and the alignment is unaffected.
+- Footage cuts just before each sign-off (725.99, 840.57, 946.85) and inside the previous brief's
+  footage (506.37) were not taken.
+
+**10/10 boundaries correct on the first (blind) run** (start: silence / anchor cut +1 frame,
+end: next anchor cut -½ frame); report sentence medians -2.4 to -2.8.
+
+Observation (briefs only): brief 14 (weather, at 1199-1228 s) was aligned into the unrelated audio
+at the end of the recording (1256-1272 s) and flagged, and brief 15 (in the recording) after it:
+the same end-of-window cramming as 11-16, now seen twice. It would matter only for a report near
+the end of a truncated recording.
+
+Parser: the title prefix `대체)` (desk mark, replacement version) was read as a station name
+(source "대체" on brief 12); added to the editorial prefixes.
+
+### Totals with the service code
+
+| Golden set | Upload reports | Boundaries correct (blind first run) |
+|---|---|---|
+| 11-16 | 5 | 10/10 |
+| 11-19 | 5 | 10/10 |
+
+## Straight briefs added to the upload targets (2026-11-20)
+
+The user extended the upload targets to own-station straight briefs (형식 S); the boundary rules
+are the same as for reports, ending at the last sentence instead of a sign-off. 11-16 and 11-19
+re-scored: reports unchanged (10/10 each). Briefs had no reference fixed beforehand, so they were
+checked after seeing the result (**not blind**): of the 14 briefs inside the recordings that got an
+automatic range, all start and end inside a silence (no speech cut), 14/14 start on the anchor-shot
+cut (+1 frame) and 12/14 end on the next anchor cut (-½ frame), checked on frames. The other two
+(11-19 S12, S13) end at last sentence + 0.4 s in the middle of the brief's footage: the next anchor
+cut is more than 3 s after the speech (S12: 2.6 s of silent footage after the speech; S13: the next
+item was not aligned). Briefs near the end of a truncated recording were rejected as before.
+
+Follow-up (user decision): a brief now also ends at the next anchor cut when it is more than 3 s
+(up to 10 s) after the last sentence and the model hears no speech in between (< 4 syllables);
+its length check stops at the last sentence + 0.4 s. Reports keep the ±3 s rule. Re-scored: reports
+10/10 on 11-16 and 11-19 (unchanged); 11-19 S12 now ends on the next anchor cut (1165.213 s,
+S13 starts at 1165.263 s). S13 still ends at its last sentence + 0.4 s because item 14 was not aligned.

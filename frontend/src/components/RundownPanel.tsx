@@ -3,14 +3,17 @@ import { Fragment, useState } from "react";
 import { isActive } from "../api/jobs";
 import { useJobRundown, useRefreshRundown } from "../api/newsroom";
 import type { JobDetail, RundownChange, RundownItem } from "../api/types";
-import { ITEM_TYPE_LABEL, SENTENCE_KIND_LABEL, formatDateTime, formatMinSec } from "../labels";
+import { CLIP_FLAG_LABEL, ITEM_TYPE_LABEL, SENTENCE_KIND_LABEL, formatDateTime, formatMinSec, timecode } from "../labels";
 import { RundownPreview } from "./RundownPreview";
 
 /** The job's cue sheet: waiting state with a manual re-check, or the parsed items. */
 export function RundownPanel({ job }: { job: JobDetail }) {
   const step = job.steps.find((s) => s.step === "newsroom");
   const waiting = step?.status === "WAITING";
-  const version = step?.status === "SUCCEEDED" ? (step.finished_at ?? "done") : null;
+  const alignStep = job.steps.find((s) => s.step === "align");
+  // Refetch when the newsroom step or the align step (which adds positions) finishes again.
+  const version =
+    step?.status === "SUCCEEDED" ? `${step.finished_at ?? "done"}|${alignStep?.finished_at ?? ""}` : null;
   const rundown = useJobRundown(job.id, version);
   const refresh = useRefreshRundown(job.id);
   const [pick, setPick] = useState<number | null>(job.cue_sheet_id);
@@ -64,7 +67,8 @@ export function RundownPanel({ job }: { job: JobDetail }) {
             </dd>
             <dt>아이템</dt>
             <dd>
-              {rundown.data.counts.items}개 · 리포트 {rundown.data.counts.reports}개 · 업로드 대상{" "}
+              {rundown.data.counts.items}개 · 리포트 {rundown.data.counts.reports}개 · 단신{" "}
+              {rundown.data.counts.briefs}개 · 업로드 대상{" "}
               <strong>{rundown.data.counts.uploads}</strong>개 · 예정 총 길이{" "}
               {formatMinSec(rundown.data.counts.planned_total_seconds)}
             </dd>
@@ -77,7 +81,7 @@ export function RundownPanel({ job }: { job: JobDetail }) {
             </ul>
           )}
           {rundown.data.changes.length > 0 && <Changes changes={rundown.data.changes} />}
-          <ItemTable items={rundown.data.items} />
+          <ItemTable items={rundown.data.items} fps={job.fps} />
         </>
       )}
     </div>
@@ -105,7 +109,7 @@ function Changes({ changes }: { changes: RundownChange[] }) {
   );
 }
 
-function ItemTable({ items }: { items: RundownItem[] }) {
+function ItemTable({ items, fps }: { items: RundownItem[]; fps: number | null }) {
   const [open, setOpen] = useState<number | null>(null);
   return (
     <table className="table rundown-table">
@@ -119,6 +123,7 @@ function ItemTable({ items }: { items: RundownItem[] }) {
           <th>예정</th>
           <th>추정</th>
           <th>업로드</th>
+          <th>녹화본 위치</th>
         </tr>
       </thead>
       <tbody>
@@ -146,10 +151,24 @@ function ItemTable({ items }: { items: RundownItem[] }) {
               <td>{formatMinSec(it.planned_duration)}</td>
               <td>{formatMinSec(it.estimated_duration)}</td>
               <td>{it.upload ? "대상" : "—"}</td>
+              <td className="small">
+                {it.align_status === "ALIGNED" && it.aligned_start != null ? (
+                  <span title={`문장 점수 중앙값 ${it.align_score?.toFixed(2)}`}>{timecode(it.aligned_start, fps)}</span>
+                ) : it.align_status === "NOT_FOUND" ? (
+                  <span className="warn-text">찾지 못함</span>
+                ) : (
+                  "—"
+                )}
+                {it.align_flags.map((f) => (
+                  <span key={f} className="tag tag-warn">
+                    {CLIP_FLAG_LABEL[f] ?? f}
+                  </span>
+                ))}
+              </td>
             </tr>
             {open === it.id && (
               <tr>
-                <td colSpan={8}>
+                <td colSpan={9}>
                   <Script item={it} />
                 </td>
               </tr>

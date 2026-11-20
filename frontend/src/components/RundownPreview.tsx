@@ -44,8 +44,8 @@ export function RundownPreview(props: {
           </div>
           {c && (
             <div className="small">
-              아이템 {c.items}개 · 리포트 {c.reports}개 (업로드 대상 <strong>{c.uploads}</strong>개
-              {c.excluded > 0 && `, 타사 제외 ${c.excluded}개`}) · 예정 총 길이{" "}
+              아이템 {c.items}개 · 리포트 {c.reports}개 · 단신 {c.briefs}개 · 업로드 대상{" "}
+              <strong>{c.uploads}</strong>개{c.excluded > 0 && ` (타사 ${c.excluded}개 제외)`} · 예정 총 길이{" "}
               {formatMinSec(c.planned_total_seconds)}
             </div>
           )}

@@ -12,10 +12,10 @@ from dataclasses import dataclass, field
 from datetime import date, time
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from app.models import Job, ProgramProfile, Rundown, RundownItem
+from app.models import AlignedSentence, Clip, Job, ProgramProfile, Rundown, RundownItem
 from app.models.base import utcnow
 from app.storage import JobFiles
 
@@ -85,7 +85,7 @@ def item_warnings(items: list[ParsedItem]) -> list[str]:
     if not items:
         warnings.append("큐시트에 아이템이 없습니다")
     elif not any(i.upload for i in items):
-        warnings.append("업로드 대상 리포트가 없습니다")
+        warnings.append("업로드 대상 기사가 없습니다")
     return warnings
 
 
@@ -214,6 +214,11 @@ def store(session: Session, job: Job, fetched: FetchedRundown) -> Rundown:
     rundown.match_reason = fetched.match.reason[:255]
     rundown.raw = {"rundown": s.raw, "items": fetched.raw_items}
     rundown.warnings = list(fetched.warnings)
+    if rundown.items:
+        # Results that hang off the old items (alignment, clips) are redone by the align step.
+        old_ids = [i.id for i in rundown.items]
+        session.execute(delete(Clip).where(Clip.rundown_item_id.in_(old_ids)))
+        session.execute(delete(AlignedSentence).where(AlignedSentence.rundown_item_id.in_(old_ids)))
     rundown.items.clear()
     session.flush()  # delete old items before inserting rows with the same item_no
     rundown.items.extend(_db_item(i) for i in fetched.items)
@@ -231,13 +236,21 @@ def store(session: Session, job: Job, fetched: FetchedRundown) -> Rundown:
     return rundown
 
 
+def count_items(types: list[str], uploads: list[bool]) -> dict[str, Any]:
+    """Counts for the preview and the job page; `types` are R / S / OTHER per item."""
+    content = [u for t, u in zip(types, uploads, strict=True) if t in (ItemType.REPORT, ItemType.BRIEF)]
+    return {
+        "items": len(types),
+        "reports": sum(t == ItemType.REPORT for t in types),
+        "briefs": sum(t == ItemType.BRIEF for t in types),
+        "uploads": sum(uploads),
+        "excluded": sum(1 for u in content if not u),  # other stations' reports and briefs
+    }
+
+
 def summarize(items: list[ParsedItem]) -> dict[str, Any]:
     planned = [i.planned_seconds for i in items if i.planned_seconds]
-    reports = [i for i in items if i.item_type == ItemType.REPORT]
     return {
-        "items": len(items),
-        "reports": len(reports),
-        "uploads": sum(i.upload for i in items),
-        "excluded": sum(1 for i in reports if not i.upload),
+        **count_items([str(i.item_type) for i in items], [i.upload for i in items]),
         "planned_total_seconds": sum(planned) if planned else None,
     }

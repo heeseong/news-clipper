@@ -192,7 +192,7 @@ def fake(app_env, monkeypatch):
     """Fake newsroom; the media steps do nothing so jobs need no video."""
     provider = FakeNewsroomProvider.from_dir()
     factory.set_provider(provider)
-    for step in ("proxy", "analyze"):
+    for step in ("proxy", "analyze", "align"):
         monkeypatch.setitem(step_registry._HANDLERS, step, lambda ctx: None)
     yield provider
     factory.set_provider(None)
@@ -237,8 +237,8 @@ def test_newsroom_step_stores_rundown(fake):
     r = rundown_of(job_id)
     assert r["id"] == 5001 and r["edition"] == 3 and r["changes"] == []
     items = r["items"]
-    assert [n for n, i in items.items() if i.upload] == [1, 2, 5, 7]
-    assert items[3].type == "S" and not items[3].upload
+    assert [n for n, i in items.items() if i.upload] == [1, 2, 3, 5, 6, 7]  # reports and briefs
+    assert items[3].type == "S" and items[3].upload
     assert items[4].source == "여수" and items[4].type == "R" and not items[4].upload
     assert items[2].title == "섬마을 의료 공백" and items[2].series == "기획"
     assert items[5].title == "항구 정비 사업 착공" and items[5].reporter == "최지훈"
@@ -354,7 +354,9 @@ def test_preview_api(api):
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["matched"]["cue_sheet_id"] == 5001 and body["matched"]["version"] == 3
-    assert body["counts"] == {"items": 7, "reports": 5, "uploads": 4, "excluded": 1, "planned_total_seconds": 610}
+    assert body["counts"] == {
+        "items": 7, "reports": 5, "briefs": 2, "uploads": 6, "excluded": 1, "planned_total_seconds": 610
+    }
     assert [d["cue_sheet_id"] for d in body["day_rundowns"]] == [5001, 5002]  # radio left out
     assert not body["ambiguous"] and body["warnings"] == []
 
@@ -362,7 +364,7 @@ def test_preview_api(api):
     assert none["matched"] is None and none["counts"] is None and "없습니다" in none["reason"]
 
     picked = api.get("/api/newsroom/rundowns", params={"date": "2026-11-02", "cue_sheet_id": 5002}).json()
-    assert picked["matched"]["program_name"] == "뉴스투데이" and picked["counts"]["uploads"] == 1
+    assert picked["matched"]["program_name"] == "뉴스투데이" and picked["counts"]["uploads"] == 2
 
 
 def test_preview_api_newsroom_down(api, fake):
@@ -381,7 +383,7 @@ def test_job_rundown_api_and_refresh(api):
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "REVIEW_READY" and r.json()["cue_sheet_id"] == 5001
     body = api.get(f"/api/jobs/{job_id}/rundown").json()
-    assert body["newsroom_rundown_id"] == 5001 and body["counts"]["uploads"] == 4
+    assert body["newsroom_rundown_id"] == 5001 and body["counts"]["uploads"] == 6
     assert [i["item_no"] for i in body["items"]] == list(range(1, 8))
     assert body["items"][0]["parsed_script"]["signoff_reporter"] == "홍길동"
 

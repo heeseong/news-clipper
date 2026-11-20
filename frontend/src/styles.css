@@ -521,3 +521,14 @@ div.rundown-preview.warn-box {
 .script .tag {
   margin-right: 0.4rem;
 }
+
+.clip-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.clip-list .tag {
+  margin-right: 0.3rem;
+}

@@ -44,5 +44,7 @@ def update_program(program_id: int, body: ProgramIn, db: DbSession) -> ProgramPr
     program.audio_track = body.audio_track
     if body.excluded_sources is not None:
         program.excluded_sources = _sources(body.excluded_sources)
+    if body.pronunciations is not None:
+        program.pronunciations = {k.strip(): v.strip() for k, v in body.pronunciations.items() if k.strip()}
     db.commit()
     return program

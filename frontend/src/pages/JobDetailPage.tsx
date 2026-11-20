@@ -2,10 +2,13 @@ import { useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { useAnalysis, useJob, usePipeline, useRetryStep } from "../api/jobs";
+import { useJobClips } from "../api/newsroom";
 import type { JobDetail, JobStep } from "../api/types";
 import { RundownPanel } from "../components/RundownPanel";
 import { JobStatusBadge, StepStatusBadge } from "../components/StatusBadge";
 import {
+  CLIP_FLAG_LABEL,
+  SNAP_LABEL,
   STAGE_LABEL,
   STEP_LABEL,
   formatBytes,
@@ -130,7 +133,7 @@ function StepCard({ step, onRetry, retrying }: { step: JobStep; onRetry: () => v
 /** Proxy player plus the cuts and silences found by the analyze step (review UI comes in M5). */
 function MediaPanel({ job }: { job: JobDetail }) {
   const video = useRef<HTMLVideoElement>(null);
-  const [tab, setTab] = useState<"cuts" | "silences">("cuts");
+  const [tab, setTab] = useState<"clips" | "cuts" | "silences">("clips");
   const a = job.artifacts;
   const analyzeStep = job.steps.find((s) => s.step === "analyze");
   const proxyStep = job.steps.find((s) => s.step === "proxy");
@@ -140,6 +143,8 @@ function MediaPanel({ job }: { job: JobDetail }) {
       ? [a.scenes, a.silences, proxyStep?.finished_at, analyzeStep?.finished_at].join("|")
       : null;
   const analysis = useAnalysis(job.id, version);
+  const alignStep = job.steps.find((s) => s.step === "align");
+  const clips = useJobClips(job.id, alignStep?.status === "SUCCEEDED" ? (alignStep.finished_at ?? "done") : null);
 
   const seek = (t: number) => {
     if (!video.current) return;
@@ -164,6 +169,9 @@ function MediaPanel({ job }: { job: JobDetail }) {
       </div>
       <div className="signals">
         <div className="tabs">
+          <button className={tab === "clips" ? "active" : ""} onClick={() => setTab("clips")}>
+            클립 {clips.data ? `(${clips.data.length})` : ""}
+          </button>
           <button className={tab === "cuts" ? "active" : ""} onClick={() => setTab("cuts")}>
             장면 전환 {analysis.data?.scenes ? `(${analysis.data.scenes.length})` : ""}
           </button>
@@ -171,7 +179,63 @@ function MediaPanel({ job }: { job: JobDetail }) {
             무음 {analysis.data?.silences ? `(${analysis.data.silences.length})` : ""}
           </button>
         </div>
-        {!(tab === "cuts" ? analysis.data?.scenes : analysis.data?.silences) ? (
+        {tab === "clips" ? (
+          !clips.data ? (
+            <p className="muted small">정렬이 끝나면 표시됩니다</p>
+          ) : clips.data.length === 0 ? (
+            <p className="muted small">업로드 대상 기사가 없습니다</p>
+          ) : (
+            <ol className="signal-list clip-list">
+              {clips.data.map((c) => (
+                <li key={c.id}>
+                  <div>
+                    <strong>
+                      {c.item_no}. {c.title}
+                    </strong>
+                  </div>
+                  {c.start_sec != null && c.end_sec != null ? (
+                    <div className="small">
+                      <button className="link" onClick={() => seek(c.start_sec!)}>
+                        {timecode(c.start_sec, job.fps)}
+                      </button>
+                      {" – "}
+                      <button className="link" onClick={() => seek(Math.max(c.start_sec!, c.end_sec! - 3))}>
+                        {timecode(c.end_sec, job.fps)}
+                      </button>
+                      <span className="muted">
+                        {" "}
+                        {formatDuration(c.end_sec - c.start_sec)} · {SNAP_LABEL[c.start_snap ?? ""] ?? c.start_snap} →{" "}
+                        {SNAP_LABEL[c.end_snap ?? ""] ?? c.end_snap}
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="small warn-text">
+                      구간 직접 지정 필요
+                      {c.suggested_start != null && (
+                        <>
+                          {" "}
+                          · 정렬 제안{" "}
+                          <button className="link" onClick={() => seek(c.suggested_start!)}>
+                            {timecode(c.suggested_start, job.fps)}
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
+                  {c.flags.length > 0 && (
+                    <div>
+                      {c.flags.map((f) => (
+                        <span key={f} className="tag tag-warn">
+                          {CLIP_FLAG_LABEL[f] ?? f}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ol>
+          )
+        ) : !(tab === "cuts" ? analysis.data?.scenes : analysis.data?.silences) ? (
           <p className="muted small">분석이 끝나면 표시됩니다</p>
         ) : (
           <ol className="signal-list">

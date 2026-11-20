@@ -6,6 +6,8 @@ Implemented:
 - analyze: alignment audio and silences (spec 5.3).
 - newsroom: find the job's cue sheet, fetch its items and scripts, parse and store them (spec 5.4).
   No cue sheet yet → the step WAITs and the job becomes WAITING_RUNDOWN (spec 10).
+- align: re-check the cue sheet edition, compute (or reuse) the acoustic model's log-probs, align
+  the scripts and create DRAFT clips for the upload reports (spec 5.5).
 Other steps are SKIPPED until their milestone.
 """
 
@@ -15,6 +17,9 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
+from app.align import acoustic
+from app.align import service as aligning
+from app.align.logprobs import LogProbs
 from app.core.config import get_settings
 from app.core.db import session_scope
 from app.media import analysis, proxy
@@ -150,4 +155,83 @@ def newsroom_step(ctx: StepContext) -> None:
     newsroom.write_files(ctx.job_id, fetched)
     with session_scope() as session:
         newsroom.store(session, session.get(Job, ctx.job_id), fetched)
+    ctx.report(1.0)
+
+
+def _recheck_edition(job_id: int) -> None:
+    """Use the latest edition of the cue sheet (spec 5.4). A newsroom outage only warns."""
+    with session_scope() as session:
+        job = session.get(Job, job_id)
+        rundown = aligning.job_rundown(session, job_id)
+        if job is None or rundown is None or job.broadcast_date is None:
+            return
+        cue_sheet_id, edition = rundown.newsroom_rundown_id, rundown.edition
+        broadcast_date, program = job.broadcast_date, newsroom.ProgramInfo.of(job.program)
+    try:
+        provider = get_provider()
+        if provider.get_rundown(cue_sheet_id).version == edition:
+            return
+        fetched = newsroom.fetch(provider, broadcast_date, program, cue_sheet_id)
+    except (NewsroomError, newsroom.RundownNotFound) as e:
+        log.warning("cue sheet edition check failed", extra={"job_id": job_id, "error": str(e)})
+        return
+    newsroom.write_files(job_id, fetched)
+    with session_scope() as session:
+        newsroom.store(session, session.get(Job, job_id), fetched)
+    log.info("cue sheet edition changed before alignment", extra={"job_id": job_id, "from": edition,
+                                                                   "to": fetched.summary.version})
+
+
+def load_logprobs(ctx: StepContext, files: JobFiles) -> LogProbs:
+    """Cached in analysis/logprobs.npz; recomputed when align.wav is newer."""
+    s = get_settings()
+    if not files.align_audio.exists():
+        raise StepError("정렬용 오디오(align.wav)가 없습니다")
+    cache = files.logprobs
+    if cache.exists() and cache.stat().st_mtime >= files.align_audio.stat().st_mtime:
+        return LogProbs.load(cache)
+    try:
+        lp = acoustic.compute_logprobs(
+            files.align_audio,
+            s.align_model,
+            chunk_seconds=s.align_chunk_seconds,
+            threads=s.align_threads,
+            on_progress=_scaled(ctx.report, 0.05, 0.85),
+        )
+    except acoustic.ModelUnavailable as e:
+        raise StepError(str(e)) from e
+    lp.save(cache)
+    return lp
+
+
+@register("align")
+def align_step(ctx: StepContext) -> None:
+    _recheck_edition(ctx.job_id)
+    ctx.report(0.05)
+    files = JobFiles(ctx.job_id)
+    with session_scope() as session:
+        job = session.get(Job, ctx.job_id)
+        rundown = aligning.job_rundown(session, ctx.job_id)
+        if job is None or rundown is None:
+            raise StepError("큐시트가 없어 정렬할 수 없습니다")
+        items = aligning.align_items_from_db(list(rundown.items))
+        fps = job.fps or 29.97
+        pronunciations = dict(job.program.pronunciations or {}) if job.program else {}
+    lp = load_logprobs(ctx, files)
+    ctx.report(0.85)
+    cuts, silences = aligning.load_signals(files.scenes, files.silences)
+    result = aligning.plan_clips(lp, items, cuts, silences, fps, pronunciations)
+    aligning.write_json(files.alignment, result)
+    with session_scope() as session:
+        job = session.get(Job, ctx.job_id)
+        aligning.store_result(session, job, aligning.job_rundown(session, ctx.job_id), result)
+    log.info(
+        "alignment done",
+        extra={
+            "job_id": ctx.job_id,
+            "clips": len(result.clips),
+            "auto": sum(c.start is not None for c in result.clips),
+            "warnings": result.warnings,
+        },
+    )
     ctx.report(1.0)

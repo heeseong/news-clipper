@@ -126,3 +126,21 @@ export function formatBytes(bytes: number | null): string {
 export function todayKst(): string {
   return new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" });
 }
+
+export const CLIP_FLAG_LABEL: Record<string, string> = {
+  LOW_CONFIDENCE: "정렬 신뢰도 낮음",
+  DURATION_MISMATCH: "예정 길이와 다름",
+  NOT_FOUND: "녹화본에 없음",
+  LEAD_ONSET_IN_SILENCE: "리드 시작 보정",
+  NO_SIGNOFF: "사인오프 없음",
+  NO_SCRIPT: "원고 없음",
+  OVERLAP: "구간 겹침",
+};
+
+export const SNAP_LABEL: Record<string, string> = {
+  scene: "앵커 컷",
+  silence: "무음",
+  align: "정렬",
+  next_item_cut: "다음 앵커 컷",
+  manual: "수동",
+};
