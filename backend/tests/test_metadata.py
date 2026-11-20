@@ -92,9 +92,8 @@ def test_thumbnail_text_follows_the_channel():
     assert defaults.thumbnail_text("짧은 제목") == "짧은 제목"
     assert defaults.thumbnail_text("전남 서남권 섬 지역 응급 의료 공백 여전히 심각") == "전남 서남권 섬 지역 응급\n의료 공백 여전히 심각"
     assert defaults.thumbnail_text("여수·순천 통합 논의") == "여수·순천 통합 논의"
-    # Briefs: the whole title (a caption bar).
-    t = "출장비 부풀리기 의혹 1년 만에…시의원 해외연수 4억 원"
-    assert defaults.thumbnail_text(t, "brief") == t
+    # Briefs: no text (the frame shows the on-air title caption).
+    assert defaults.thumbnail_text("출장비 부풀리기 의혹 1년 만에…시의원 해외연수 4억 원", "brief") == ""
 
 
 def test_tags_stay_under_youtube_limit():
@@ -143,7 +142,7 @@ def test_llm_suggestions_are_added_as_candidates():
     assert split.thumbnail_text == "압해도 새 다리\n오늘 개통"  # the title split at its ellipsis wins
     assert [c["source"] for c in split.thumbnail_text_candidates] == ["title", "llm"]
     brief = generate(BRIEF, StaticProvider(suggestions(thumbnail_text="축제 준비")))
-    assert brief.thumbnail_text == "겨울 축제 준비"  # a brief's caption is its title
+    assert brief.thumbnail_text == "" and brief.thumbnail_text_candidates == []  # nothing drawn on a brief
     assert g.warnings == []
 
 

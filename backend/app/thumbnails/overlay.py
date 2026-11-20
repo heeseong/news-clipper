@@ -1,19 +1,20 @@
-"""Thumbnail text overlay (spec 5.7, plan 4.5): 1280x720 JPG of at most 2 MB.
+"""Thumbnails (spec 5.7, plan 4.5): 1280x720 JPG of at most 2 MB.
 
-Two styles, after the station's YouTube channel (2026-11-20):
+Per kind, after the station's YouTube channel (2026-11-20):
 
-- `headline` (reports): the logo on a blue corner band at the top right; the thumbnail text in big
-  letters at the bottom left on a blue diagonal band, first line yellow, second line white.
-- `lower_third` (straight briefs): the title on a white caption bar at the bottom, like an on-air
-  super, and a small logo at the top right.
+- reports, style `headline`: the thumbnail text in big letters at the bottom left, first line
+  yellow, second line white. The design is a template image (`overlay_image`, a 1280x720 PNG with
+  transparency: logo, bands …) laid over the frame before the text; it is uploaded per program
+  (PUT /api/programs/{id}/thumbnail-overlay). Until there is one, a placeholder design is drawn
+  (blue corner band with the station name, blue diagonal band behind the text).
+- straight briefs, style `frame`: the frame as it is. The candidate frames favour the footage with
+  the on-air title caption at the bottom (candidates.caption_score), so nothing is drawn.
 
-The design comes from the program profile's `thumbnail_template` (JSON). Flat keys apply to both
-kinds; `"report": {...}` and `"brief": {...}` override per kind. Keys left out use
-DEFAULT_TEMPLATES. Fonts and logos are files under STORAGE_ROOT/branding/ (or absolute paths).
+The program profile's `thumbnail_template` (JSON) changes the defaults: flat keys apply to both
+kinds, `"report": {...}` and `"brief": {...}` override per kind. Fonts and images are files under
+STORAGE_ROOT/branding/ (or absolute paths).
 
-    {"logo": "mokpo_mbc_news.png", "report": {"line_colors": ["#FFD31A", "#FFFFFF"]}}
-
-Without a logo file the station name is drawn as text (`logo_text`) as a placeholder.
+    {"report": {"overlay_image": "programs/1/report_overlay.png", "text_box": [48, 470, 1184, 210]}}
 """
 
 from __future__ import annotations
@@ -25,49 +26,34 @@ from typing import Any
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from app.core.config import get_settings
-from app.metadata.defaults import split_at_separator
 
 WIDTH, HEIGHT = 1280, 720
 MAX_BYTES = 2 * 1024 * 1024
 FONT = Path(__file__).parent / "fonts" / "NanumGothic-ExtraBold.ttf"
 KINDS = ("report", "brief")
 
-COMMON: dict[str, Any] = {
-    "font": None,  # default: bundled NanumGothic ExtraBold
-    "margin": 48,
-    "line_spacing": 1.12,
-    "logo": None,  # PNG with transparency
-    "logo_text": None,  # placeholder when there is no logo file; default: station name + NEWS
-    "logo_height": 84,
-    "accent_color": "#2D5BD7",  # MBC blue: corner and diagonal bands, caption tab
-}
 DEFAULT_TEMPLATES: dict[str, dict[str, Any]] = {
-    "report": COMMON
-    | {
+    "report": {
         "style": "headline",
+        "overlay_image": None,  # template PNG (1280x720, transparent) laid over the frame
+        "text_box": None,  # [x, y, width, height] for the text, bottom-aligned; default: bottom left
+        "font": None,  # default: bundled NanumGothic ExtraBold
         "font_size": 92,
         "min_font_size": 56,
         "max_lines": 2,
+        "margin": 48,
+        "line_spacing": 1.12,
         "line_colors": ["#FFD31A", "#FFFFFF"],
         "stroke_color": "#0B1A3A",
         "stroke_width": 5,
-        "shade": 0.55,  # dark gradient over the lower part
-        "corner_band": True,  # blue band behind the logo
-        "diagonal_band": True,  # blue band behind the text
+        "shade": 0.55,  # dark gradient over the lower part (0 with a template image unless set)
+        # Placeholder design, used only without a template image:
+        "accent_color": "#2D5BD7",
+        "logo": None,  # PNG; default: the station name as text
+        "logo_text": None,
+        "logo_height": 84,
     },
-    "brief": COMMON
-    | {
-        "style": "lower_third",
-        "font_size": 50,
-        "min_font_size": 34,
-        "one_line_min_size": 42,
-        "max_lines": 2,
-        "logo_height": 56,
-        "bar_color": "#FFFFFF",
-        "bar_opacity": 0.94,
-        "text_color": "#10204A",
-        "corner_band": False,
-    },
+    "brief": {"style": "frame"},
 }
 TEMPLATE_KEYS = set().union(*(t.keys() for t in DEFAULT_TEMPLATES.values()))
 
@@ -81,7 +67,10 @@ def template_for(kind: str, profile_template: dict[str, Any] | None) -> dict[str
     p = profile_template or {}
     flat = {k: v for k, v in p.items() if k in TEMPLATE_KEYS}
     own = {k: v for k, v in (p.get(kind) or {}).items() if k in TEMPLATE_KEYS}
-    return DEFAULT_TEMPLATES[kind] | flat | own
+    t = DEFAULT_TEMPLATES[kind] | flat | own
+    if t.get("overlay_image") and "shade" not in flat and "shade" not in own:
+        t["shade"] = 0  # the template image carries its own design
+    return t
 
 
 def unknown_keys(profile_template: dict[str, Any]) -> list[str]:
@@ -151,12 +140,12 @@ def _shade(img: Image.Image, top: int, strength: float) -> None:
     img.paste(Image.new("RGB", (WIDTH, h), "black"), (0, top), alpha)
 
 
-def _bands(img: Image.Image, t: dict[str, Any], text_top: int | None) -> None:
+def _placeholder_bands(img: Image.Image, t: dict[str, Any], text_top: int | None) -> None:
+    """Blue corner band (logo) and diagonal band (text) until the real template image arrives."""
     layer = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
     d = ImageDraw.Draw(layer)
-    if t.get("corner_band"):
-        d.polygon([(int(WIDTH * 0.66), 0), (WIDTH, 0), (WIDTH, int(HEIGHT * 0.36))], fill=_rgba(t["accent_color"], 0.9))
-    if t.get("diagonal_band") and text_top is not None:
+    d.polygon([(int(WIDTH * 0.66), 0), (WIDTH, 0), (WIDTH, int(HEIGHT * 0.36))], fill=_rgba(t["accent_color"], 0.9))
+    if text_top is not None:
         top = max(0, text_top - 70)
         d.polygon([(0, top), (int(WIDTH * 0.42), top), (int(WIDTH * 0.66), HEIGHT), (0, HEIGHT)],
                   fill=_rgba(t["accent_color"], 0.55))  # fmt: skip
@@ -195,53 +184,35 @@ def _text(img: Image.Image, xy: tuple[float, float], line: str, font, fill: str,
                              stroke_width=t.get("stroke_width", 0), stroke_fill=t.get("stroke_color"))  # fmt: skip
 
 
+def overlay_path(t: dict[str, Any]) -> Path | None:
+    return _asset(t.get("overlay_image"))
+
+
 def _headline(img: Image.Image, text: str, t: dict[str, Any]) -> None:
     m = t["margin"]
-    if not text:
-        _bands(img, t, None)
-        return
-    font, lines = layout(text, t, WIDTH - 2 * m)
-    ascent, descent = font.getmetrics()
-    line_h = int((ascent + descent) * t["line_spacing"])
-    y0 = HEIGHT - m - line_h * len(lines) + int(descent * 0.6)
-    _shade(img, max(0, y0 - 160), t["shade"])
-    _bands(img, t, y0)
-    colors = t["line_colors"] or ["#FFFFFF"]
-    # One line: white, like the second line of a two-line headline.
-    offset = len(colors) - len(lines) if len(lines) < len(colors) else 0
-    for i, line in enumerate(lines):
-        _text(img, (m, y0 + i * line_h), line, font, colors[min(i + offset, len(colors) - 1)], t)
-
-
-def _two_lines(text: str) -> str:
-    parts = split_at_separator(text)
-    return "\n".join(parts) if parts else text
-
-
-def _lower_third(img: Image.Image, text: str, t: dict[str, Any]) -> None:
-    if not text:
-        return
-    m = t["margin"]
-    tab = 22  # accent tab at the left of the bar
-    pad_x, pad_y = 28, 18
-    max_w = WIDTH - 2 * m - tab - 2 * pad_x
-    one_line = " ".join(text.split())
-    # One line where it fits at a readable size, else two lines (split at the ellipsis).
-    font, lines = layout(one_line, t | {"max_lines": 1, "min_font_size": t["one_line_min_size"]}, max_w)
-    if ImageDraw.Draw(img).textlength(lines[0], font=font) > max_w or len(lines) > 1:
-        font, lines = layout(_two_lines(one_line), t, max_w)
-    ascent, descent = font.getmetrics()
-    line_h = int((ascent + descent) * t["line_spacing"])
-    bar_h = line_h * len(lines) + 2 * pad_y
-    top = HEIGHT - m - bar_h
-    layer = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
-    d = ImageDraw.Draw(layer)
-    d.rectangle([m, top, WIDTH - m, top + bar_h], fill=_rgba(t["bar_color"], t["bar_opacity"]))
-    d.rectangle([m, top, m + tab, top + bar_h], fill=_rgba(t["accent_color"], 1.0))
-    img.paste(layer, (0, 0), layer)
-    draw = ImageDraw.Draw(img)
-    for i, line in enumerate(lines):
-        draw.text((m + tab + pad_x, top + pad_y + i * line_h), line, font=font, fill=t["text_color"])
+    template = overlay_path(t)
+    x, y, w, h = t["text_box"] or (m, 0, WIDTH - 2 * m, HEIGHT - m)
+    y0 = None
+    if text:
+        font, lines = layout(text, t, w)
+        ascent, descent = font.getmetrics()
+        line_h = int((ascent + descent) * t["line_spacing"])
+        y0 = y + h - line_h * len(lines) + int(descent * 0.6)  # bottom-aligned in the box
+        _shade(img, max(0, y0 - 160), t["shade"])
+    if template:
+        layer = Image.open(template).convert("RGBA")
+        if layer.size != (WIDTH, HEIGHT):
+            layer = layer.resize((WIDTH, HEIGHT), Image.LANCZOS)
+        img.paste(layer, (0, 0), layer)
+    else:
+        _placeholder_bands(img, t, y0)
+        _logo(img, t)
+    if text:
+        colors = t["line_colors"] or ["#FFFFFF"]
+        # One line: white, like the second line of a two-line headline.
+        offset = len(colors) - len(lines) if len(lines) < len(colors) else 0
+        for i, line in enumerate(lines):
+            _text(img, (x, y0 + i * line_h), line, font, colors[min(i + offset, len(colors) - 1)], t)
 
 
 def render(frame: Path, text: str, template: dict[str, Any]) -> Image.Image:
@@ -249,13 +220,9 @@ def render(frame: Path, text: str, template: dict[str, Any]) -> Image.Image:
     img = Image.open(frame).convert("RGB")
     if img.size != (WIDTH, HEIGHT):
         img = img.resize((WIDTH, HEIGHT))
-    text = text.strip()
-    if template["style"] == "lower_third":
-        _lower_third(img, text, template)
-    else:
-        _headline(img, text, template)
-    _logo(img, template)
-    return img
+    if template["style"] == "headline":
+        _headline(img, text.strip(), template)
+    return img  # "frame": the picture as it is
 
 
 def save_jpeg(img: Image.Image, out: Path, max_bytes: int = MAX_BYTES) -> Path:

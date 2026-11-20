@@ -113,12 +113,12 @@ def _balanced_lines(title: str) -> str:
 
 def thumbnail_text(title: str, kind: str = "report") -> str:
     """What the channel puts on thumbnails (2026-11-20):
-    - a brief: the whole title (a caption bar at the bottom),
+    - a brief: nothing (its thumbnail is a frame showing the on-air title caption),
     - a report: the title in two big lines, split at its ellipsis
       ("공정성 외친 77일"...광장 떠나 장기전으로 → two lines); a short title stays one line."""
     title = " ".join(title.split())
     if kind == "brief":
-        return title
+        return ""
     parts = split_at_separator(title)
     if parts:
         head, tail = parts

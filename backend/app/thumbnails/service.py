@@ -74,7 +74,7 @@ def make_candidates(
     shutil.rmtree(work, ignore_errors=True)
     anchor_end = anchor_end_for(r.kind, r.start, r.end, cuts, r.lead_end)
     times = candidate_times(r.start, r.end, cuts, anchor_end, samples)
-    picked = find_candidates(src, probe, times, work, count, on_progress=on_progress)
+    picked = find_candidates(src, probe, times, work, count, kind=r.kind, on_progress=on_progress)
     shutil.rmtree(out_dir, ignore_errors=True)
     out_dir.mkdir(parents=True)
     rows = []

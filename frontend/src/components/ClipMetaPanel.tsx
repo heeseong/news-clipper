@@ -59,7 +59,7 @@ export function ClipMetaPanel({
             <button
               key={t.id}
               className={`thumb${t.selected ? " selected" : ""}`}
-              title={`점수 ${t.score?.toFixed(2)} · 선명도 ${t.details.sharpness} · 노출 ${t.details.exposure} · 얼굴 ${t.details.face}${t.details.anchor ? " · 앵커 샷" : ""}`}
+              title={`점수 ${t.score?.toFixed(2)} · 선명도 ${t.details.sharpness} · 노출 ${t.details.exposure} · 얼굴 ${t.details.face} · 자막 ${t.details.caption ?? 0}${t.details.anchor ? " · 앵커 샷" : ""}`}
               onClick={() => t.frame_sec != null && seek(t.frame_sec)}
             >
               <img src={t.url} alt={`후보 ${t.rank}`} loading="lazy" />
@@ -76,10 +76,16 @@ export function ClipMetaPanel({
             <strong>제목</strong>
           </div>
           <Candidates items={meta.title_candidates} current={meta.title} />
-          <div className="small">
-            <strong>썸네일 문구</strong>
-          </div>
-          <Candidates items={meta.thumbnail_text_candidates} current={meta.thumbnail_text} />
+          {meta.thumbnail_text_candidates.length > 0 ? (
+            <>
+              <div className="small">
+                <strong>썸네일 문구</strong>
+              </div>
+              <Candidates items={meta.thumbnail_text_candidates} current={meta.thumbnail_text} />
+            </>
+          ) : (
+            <div className="small muted">단신 썸네일은 방송 하단 자막이 보이는 프레임을 그대로 씁니다</div>
+          )}
           <div className="small">
             <strong>설명</strong>
           </div>

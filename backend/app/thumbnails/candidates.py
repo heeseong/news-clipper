@@ -7,6 +7,9 @@ even intervals, then scored:
 - exposure: mid-grey brightness and some contrast score higher; near-black and flat frames lose
 - face: a clearly visible face (YuNet) scores higher
 - anchor shot: frames in the anchor's part of the clip lose (report pictures are preferred)
+- caption (briefs only): a straight brief's thumbnail is a frame of the footage that shows the
+  on-air caption (the title super at the bottom), so frames with one score much higher. Found by
+  text-like strokes and a horizontal bar edge in the bottom band (no OCR)
 
 The best frame of each shot comes first, so the top candidates are different pictures.
 """
@@ -30,7 +33,26 @@ NEAR_CUT = 0.15  # frames this close to a cut may be blends
 MIN_GAP = 0.25  # candidate times closer than this are the same frame
 FACE_MODEL = Path(__file__).parent / "models" / "face_detection_yunet_2023mar.onnx"
 
-WEIGHTS = {"sharpness": 0.45, "exposure": 0.25, "face": 0.3, "anchor": -0.6, "dark": -1.0}
+WEIGHTS = {"sharpness": 0.45, "exposure": 0.25, "face": 0.3, "anchor": -0.6, "dark": -1.0, "caption": 0.0}
+WEIGHTS_BY_KIND = {"report": WEIGHTS, "brief": WEIGHTS | {"face": 0.15, "caption": 1.0}}
+CAPTION_BAND = (0.70, 0.95)  # where the on-air title caption sits (share of the height)
+
+
+def caption_score(gray: np.ndarray) -> float:
+    """0..1: how much the bottom band looks like a caption bar with text over the picture."""
+    import cv2
+
+    h = gray.shape[0]
+    band = gray[int(h * CAPTION_BAND[0]) : int(h * CAPTION_BAND[1])]
+    mid = gray[int(h * 0.35) : int(h * 0.65)]
+    gx_band = np.abs(cv2.Sobel(band, cv2.CV_32F, 1, 0, ksize=3))
+    gx_mid = np.abs(cv2.Sobel(mid, cv2.CV_32F, 1, 0, ksize=3))
+    gy_band = np.abs(cv2.Sobel(band, cv2.CV_32F, 0, 1, ksize=3))
+    # Text: many sharp vertical strokes in the band, more than in the picture above it.
+    text = float(np.clip(((gx_band > 120).mean() - (gx_mid > 120).mean()) * 6, 0, 1))
+    # Bar: a horizontal edge across most of the width (the caption box's top or bottom).
+    border = float(np.clip((gy_band > 80).mean(axis=1).max() / 0.6, 0, 1))
+    return round(text * (0.4 + 0.6 * border), 3)
 
 
 @dataclass
@@ -144,19 +166,24 @@ def measure(path: Path, faces: FaceDetector | None) -> dict[str, float]:
         "brightness": float(gray.mean()),
         "contrast": float(gray.std()),
         "face_area": faces.largest_face(bgr) if faces else 0.0,
+        "caption": caption_score(gray),
     }
 
 
-def score(candidates: list[Candidate], measures: list[dict[str, float]]) -> None:
+def score(candidates: list[Candidate], measures: list[dict[str, float]], kind: str = "report") -> None:
+    weights = WEIGHTS_BY_KIND.get(kind, WEIGHTS)
     top = max((math.log1p(m["laplacian"]) for m in measures), default=0.0) or 1.0
     for c, m in zip(candidates, measures, strict=True):
         sharp = math.log1p(m["laplacian"]) / top
         exposure = max(0.0, 1 - abs(m["brightness"] - 120) / 120) * min(1.0, m["contrast"] / 40)
         face = min(1.0, m["face_area"] / 0.04) if m["face_area"] else 0.0
         dark = 1.0 if m["brightness"] < 20 or m["contrast"] < 8 else 0.0
-        parts = {"sharpness": sharp, "exposure": exposure, "face": face, "anchor": float(c.in_anchor), "dark": dark}
-        c.score = round(sum(WEIGHTS[k] * v for k, v in parts.items()), 4)
-        c.details = {k: round(v, 3) for k, v in parts.items()} | {k: round(v, 2) for k, v in m.items()}
+        parts = {"sharpness": sharp, "exposure": exposure, "face": face, "anchor": float(c.in_anchor), "dark": dark,
+                 "caption": m.get("caption", 0.0)}  # fmt: skip
+        c.score = round(sum(weights[k] * v for k, v in parts.items()), 4)
+        c.details = {k: round(v, 3) for k, v in parts.items()} | {
+            k: round(v, 2) for k, v in m.items() if k != "caption"
+        }
 
 
 def pick(candidates: list[Candidate], n: int) -> list[Candidate]:
@@ -176,6 +203,7 @@ def find_candidates(
     work_dir: Path,
     n: int = 6,
     *,
+    kind: str = "report",
     detect_faces: bool = True,
     threads: int = 4,
     on_progress: Callable[[float], None] | None = None,
@@ -197,5 +225,5 @@ def find_candidates(
         list(pool.map(grab, times))
     faces = FaceDetector() if detect_faces and FACE_MODEL.exists() else None
     measures = [measure(c.path, faces) for c in times]
-    score(times, measures)
+    score(times, measures, kind)
     return pick(times, n)

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 from app.core.db import session_scope
 from app.media.ffmpeg import probe
@@ -108,29 +108,62 @@ def test_report_headline_two_lines_yellow_then_white(grey: Path):
     assert np.abs(img[150:250, 300:500] - 128).max() < 10  # the middle of the picture is untouched
 
 
-def test_brief_caption_bar_one_line_or_split_at_ellipsis(grey: Path):
-    short = np.asarray(overlay.render(grey, "겨울 축제 준비", BRIEF_T)).astype(int)
-    bar_rows = np.where((short[:, 640] > 235).all(axis=-1))[0]
-    assert bar_rows.min() > 520 and bar_rows.max() > 650  # white bar at the bottom
-    assert short[600, 60, 2] > 180 and short[600, 60, 0] < 90  # blue tab at the left
-    t = "국립의대 용역비 논란에 만든 예비비 통제 조례 폐지 추진…의회 다시 논의"
-    font, lines = overlay.layout(overlay._two_lines(t), BRIEF_T, 1100)
-    assert lines == ["국립의대 용역비 논란에 만든 예비비 통제 조례 폐지 추진…", "의회 다시 논의"]
-    font, lines = overlay.layout("짧은 제목", BRIEF_T | {"max_lines": 1}, 1100)
-    assert lines == ["짧은 제목"] and font.size == BRIEF_T["font_size"]
+def test_brief_thumbnail_is_the_frame_as_it_is(frame: Path):
+    out = np.asarray(overlay.render(frame, "아무 문구", BRIEF_T)).astype(int)
+    assert np.abs(out - np.asarray(Image.open(frame).convert("RGB")).astype(int)).max() == 0
 
 
-def test_profile_template_overrides_and_logo(grey: Path, tmp_path: Path, monkeypatch):
+def test_profile_template_keys(tmp_path: Path, grey: Path, monkeypatch):
     monkeypatch.setattr(overlay, "branding_dir", lambda: tmp_path)
     Image.new("RGBA", (200, 100), (255, 0, 0, 255)).save(tmp_path / "logo.png")
-    profile = {"logo": "logo.png", "brief": {"bar_color": "#000000"}, "report": {"corner_band": False}}
+    profile = {"logo": "logo.png", "report": {"line_colors": ["#FFFFFF"]}}
     rep = overlay.template_for("report", profile)
-    assert rep["logo"] == "logo.png" and rep["corner_band"] is False and rep["style"] == "headline"
+    assert rep["logo"] == "logo.png" and rep["line_colors"] == ["#FFFFFF"] and rep["style"] == "headline"
     img = np.asarray(overlay.render(grey, "", rep)).astype(int)
-    assert img[60, 1180, 0] > 200 and img[60, 1180, 1] < 60  # red logo at the top right
-    assert overlay.template_for("brief", profile)["bar_color"] == "#000000"
+    assert img[60, 1180, 0] > 200 and img[60, 1180, 1] < 60  # placeholder design with the logo file
     assert overlay.unknown_keys(profile) == []
     assert overlay.unknown_keys({"colour": 1, "brief": {"size": 2}, "report": 3}) == ["brief.size", "colour", "report"]
+
+
+def test_report_template_image_replaces_the_placeholder(grey: Path, tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(overlay, "branding_dir", lambda: tmp_path)
+    tpl_img = Image.new("RGBA", (1280, 720), (0, 0, 0, 0))
+    tpl_img.paste(Image.new("RGBA", (200, 100), (255, 0, 0, 255)), (1050, 30))  # a red "logo"
+    tpl_img.save(tmp_path / "tpl.png")
+    profile = {"report": {"overlay_image": "tpl.png", "text_box": [100, 300, 900, 200]}}
+    t = overlay.template_for("report", profile)
+    assert t["shade"] == 0  # the template carries its own design
+    img = np.asarray(overlay.render(grey, "첫 줄\n둘째 줄", t)).astype(int)
+    assert img[80, 1150, 0] > 200 and img[80, 1150, 1] < 60  # template on top of the frame
+    assert img[10, 1270, 2] < 160  # no placeholder blue corner band
+    lit = (img[:, 100:1000] > 200).all(axis=-1) | ((img[:, 100:1000, 0] > 200) & (img[:, 100:1000, 2] < 90))
+    text_rows = np.where(lit.any(axis=1))[0]
+    assert text_rows.min() >= 300 and text_rows.max() <= 520  # the text stays in its box
+    assert overlay.template_for("report", {"report": {**profile["report"], "shade": 0.3}})["shade"] == 0.3
+    assert overlay.template_for("brief", profile)["style"] == "frame"
+
+
+def test_brief_candidates_favour_the_on_air_caption(tmp_path: Path):
+    """Two equally good pictures; the one with the title caption at the bottom wins for a brief."""
+    from app.thumbnails.overlay import FONT
+
+    rng = np.random.default_rng(1)
+    base = Image.fromarray(rng.integers(60, 200, (72, 128, 3), dtype=np.uint8)).resize((1280, 720), Image.BICUBIC)
+    plain, captioned = tmp_path / "plain.jpg", tmp_path / "cap.jpg"
+    base.save(plain)
+    img = base.copy()
+    d = ImageDraw.Draw(img)
+    d.rectangle([60, 560, 1220, 640], fill="white")
+    d.text((90, 572), "출장비 부풀리기 의혹 1년 만에…시의원 해외연수", font=ImageFont.truetype(str(FONT), 50), fill="#10204A")
+    img.save(captioned)
+    m_plain, m_cap = measure(plain, None), measure(captioned, None)
+    assert m_cap["caption"] > 0.3 and m_plain["caption"] < 0.1
+    brief = [Candidate(1.0, 0, False), Candidate(2.0, 1, False)]
+    score(brief, [m_plain, m_cap], "brief")
+    assert brief[1].score > brief[0].score + 0.25 and brief[1].details["caption"] > 0.3
+    report = [Candidate(1.0, 0, False), Candidate(2.0, 1, False)]
+    score(report, [m_plain, m_cap], "report")
+    assert abs(report[1].score - report[0].score) < brief[1].score - brief[0].score
 
 
 # --- frames from the original ---
@@ -254,12 +287,38 @@ def test_rerunning_align_replaces_metadata_and_files(job_with_source):
 def test_program_metadata_settings_api(client):
     r = client.post("/api/programs", json={"name": "뉴스투데이", "default_tags": [" 뉴스 ", "뉴스", ""],
                                            "description_footer": "{program} {date}",
-                                           "thumbnail_template": {"brief": {"bar_opacity": 0.8}}})
+                                           "thumbnail_template": {"report": {"font_size": 80}}})
     assert r.status_code == 201, r.text
     body = r.json()
-    assert body["default_tags"] == ["뉴스"] and body["thumbnail_template"] == {"brief": {"bar_opacity": 0.8}}
+    assert body["default_tags"] == ["뉴스"] and body["thumbnail_template"] == {"report": {"font_size": 80}}
     r = client.put(f"/api/programs/{body['id']}", json={"name": "뉴스투데이", "thumbnail_template": {"colour": 1}})
     assert r.status_code == 422
     r = client.put(f"/api/programs/{body['id']}", json={"name": "뉴스투데이", "description_footer": ""})
     assert r.json()["description_footer"] is None and r.json()["default_tags"] == ["뉴스"]
     assert json.dumps(r.json(), ensure_ascii=False)
+
+
+def test_report_template_upload_api(client):
+    import io
+
+    pid = client.post("/api/programs", json={"name": "뉴스데스크"}).json()["id"]
+
+    def png(size, alpha=0):
+        buf = io.BytesIO()
+        Image.new("RGBA", size, (0, 0, 255, alpha)).save(buf, "PNG")
+        return buf.getvalue()
+
+    url = f"/api/programs/{pid}/thumbnail-overlay"
+    assert client.put(url, content=png((1920, 1080), 255)).status_code == 422  # no transparency
+    assert client.put(url, content=png((1000, 1000))).status_code == 422  # not 16:9
+    assert client.put(url, content=b"not an image").status_code == 422
+    r = client.put(url, content=png((1920, 1080)), headers={"content-type": "image/png"})
+    assert r.status_code == 200, r.text
+    rel = r.json()["thumbnail_template"]["report"]["overlay_image"]
+    with Image.open(overlay.branding_dir() / rel) as saved:
+        assert saved.size == (1280, 720)
+    preview = client.get(f"/api/programs/{pid}/thumbnail-preview")
+    assert preview.status_code == 200 and preview.headers["content-type"] == "image/jpeg"
+    r = client.delete(url)
+    assert "overlay_image" not in r.json()["thumbnail_template"]["report"]
+    assert not (overlay.branding_dir() / rel).exists()
