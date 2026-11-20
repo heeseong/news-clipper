@@ -6,6 +6,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -37,6 +38,17 @@ class Settings(BaseSettings):
     silence_noise_db: float = -35.0
     silence_min_seconds: float = 0.25
     ffmpeg_timeout_seconds: int = 3 * 3600
+
+    # Newsroom (MARS-L, spec 3.1). "fake" serves synthetic fixtures (app/newsroom/fixtures).
+    newsroom_provider: Literal["fake", "marsl"] = "fake"
+    marsl_base_url: str = "https://api.marsl.co.kr"
+    marsl_api_key: SecretStr | None = None  # sent as the Mars-Secret header; never logged
+    marsl_timeout_seconds: float = 10.0
+    marsl_max_retries: int = 3
+    # Fake only: a fixture directory other than the built-in one, and whether every fixture cue
+    # sheet is served for any requested date (handy for synthetic test recordings).
+    fake_newsroom_dir: Path | None = None
+    fake_newsroom_any_date: bool = True
 
     # Run Celery tasks in-process (tests, or running the API without workers).
     celery_always_eager: bool = False

@@ -6,6 +6,7 @@ jobs/{job_id}/source/probe.json
 jobs/{job_id}/proxy/proxy.mp4, sprite.jpg, sprite.json, waveform.json
 jobs/{job_id}/audio/align.wav
 jobs/{job_id}/analysis/scenes.json, silences.json
+jobs/{job_id}/newsroom/rundown.json, scripts/{item_no}.json
 """
 
 from __future__ import annotations
@@ -67,6 +68,19 @@ class JobFiles:
     @property
     def silences(self) -> Path:
         return self.dir / "analysis" / "silences.json"
+
+    @property
+    def rundown(self) -> Path:
+        """Raw MARS-L responses (002 + 003 `data`) as fetched."""
+        return self.dir / "newsroom" / "rundown.json"
+
+    @property
+    def scripts_dir(self) -> Path:
+        return self.dir / "newsroom" / "scripts"
+
+    def script(self, item_no: int) -> Path:
+        """Parsed item (RundownItem with its ParsedScript)."""
+        return self.scripts_dir / f"{item_no}.json"
 
 
 # Files the browser may fetch via /media/jobs/{id}/{name}

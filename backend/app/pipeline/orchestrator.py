@@ -16,7 +16,7 @@ from app.core.config import get_settings
 from app.models import Job, JobStatus, JobStep, StepStatus
 from app.models.base import utcnow
 
-from .definition import FINAL_STATUS, PIPELINE, STEPS
+from .definition import FINAL_STATUS, PIPELINE, STEPS, WAITING_STATUS
 from .steps import StepContext
 
 log = logging.getLogger(__name__)
@@ -75,6 +75,7 @@ def begin_stage(session: Session, job_id: int, stage_idx: int) -> list[QueuedSte
             StepStatus.PENDING,
             StepStatus.FAILED,
             StepStatus.SKIPPED,
+            StepStatus.WAITING,
         ):
             row.status = StepStatus.QUEUED
             row.error = None
@@ -149,15 +150,35 @@ def mark_failed(session: Session, job_id: int, step: str, error: str) -> None:
     job.error = f"{step}: {error}"
 
 
+def mark_waiting(session: Session, job_id: int, step: str, reason: str) -> None:
+    row = _step(session, job_id, step)
+    row.status = StepStatus.WAITING
+    row.finished_at = utcnow()
+    row.progress = None
+    row.error = reason
+
+
 def stage_outcome(
     session: Session, job_id: int, stage_idx: int
-) -> Literal["succeeded", "failed", "incomplete"]:
+) -> Literal["succeeded", "failed", "waiting", "incomplete"]:
     rows = [r for r in _job(session, job_id).steps if r.stage == stage_idx]
     if all(r.status in DONE for r in rows):
         return "succeeded"
     if any(r.status in ACTIVE or r.status == StepStatus.PENDING for r in rows):
         return "incomplete"
-    return "failed"
+    if any(r.status == StepStatus.FAILED for r in rows):
+        return "failed"
+    return "waiting"
+
+
+def wait_job(session: Session, job_id: int, stage_idx: int) -> None:
+    """Every other step of the stage is done; the job waits for the cue sheet (spec 10)."""
+    job = _job(session, job_id)
+    waiting = [r for r in job.steps if r.stage == stage_idx and r.status == StepStatus.WAITING]
+    job.status = WAITING_STATUS
+    job.current_step = waiting[0].step if waiting else None
+    job.error = waiting[0].error if waiting else None
+    log.info("job waiting", extra={"job_id": job_id, "reason": job.error})
 
 
 def prepare_retry(session: Session, job_id: int, step: str) -> int:
@@ -173,7 +194,7 @@ def prepare_retry(session: Session, job_id: int, step: str) -> int:
         raise TransitionError("다른 단계가 아직 실행 중입니다")
     stage_idx, _ = STEPS[step]
     target = _step(session, job_id, step)
-    if target.status not in (StepStatus.FAILED, *DONE):
+    if target.status not in (StepStatus.FAILED, StepStatus.WAITING, *DONE):
         raise TransitionError(f"'{step}' 단계는 아직 실행되지 않았습니다")
     if any(r.stage < stage_idx and r.status not in DONE for r in job.steps):
         raise TransitionError("앞 단계가 끝나지 않았습니다")

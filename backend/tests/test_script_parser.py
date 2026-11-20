@@ -211,7 +211,10 @@ def test_other_station_report_is_not_uploaded():
     by_reporter = build_item(
         {**base, "article": {**base["article"], "articleTitle": "제목", "reporterName": "이재원(광주)"}}
     )
-    assert by_reporter.reporter == "이재원" and not by_reporter.upload
+    assert by_reporter.source == "광주" and not by_reporter.upload
+    # The script's sign-off (홍길동) wins over the cue sheet label; the mismatch is a warning.
+    assert by_reporter.reporter == "홍길동"
+    assert any(w.startswith("SIGNOFF_REPORTER_MISMATCH") for w in by_reporter.script.warnings)
 
     own_dept = build_item({**base, "article": {**base["article"], "articleTitle": "제목"}}, department="보도부")
     assert own_dept.upload
@@ -283,8 +286,32 @@ def test_article_type_classifies_without_remark():
 
 def test_other_station_from_article_origin_fields():
     # Imported by our desk (reporterName) but written at another station; no title prefix.
+    content = API_REPORT["article"]["articleContent"].replace("홍길동", "문아무개")
     article = {**API_REPORT["article"], "reporterName": "데스크", "originReporterName": "문아무개",
-               "originChannelName": "여수", "isSameChannel": False}
+               "originChannelName": "여수", "isSameChannel": False, "articleContent": content}
     item = build_item({**API_REPORT, "article": article})
     assert item.source == "여수" and not item.upload
     assert item.reporter == "문아무개"
+
+
+def test_signoff_reporter_replaces_desk_and_title_suffix():
+    # The cue sheet names the desk (이데스크); the script is signed off by 최지훈.
+    content = API_REPORT["article"]["articleContent"].replace("홍길동", "최지훈")
+    article = {**API_REPORT["article"], "reporterName": "이데스크", "originReporterName": "이데스크",
+               "articleContent": content, "articleTitle": "항구 정비 착공/최지훈"}
+    item = build_item({**API_REPORT, "article": article})
+    assert item.reporter == "최지훈"
+    assert item.title.clean == "항구 정비 착공"
+    assert "SIGNOFF_REPORTER_MISMATCH:최지훈!=이데스크" in item.script.warnings
+    # Only the reporter's own name is removed from the end of the title.
+    other = build_item({**API_REPORT, "article": {**API_REPORT["article"], "articleTitle": "광주/전남 첫눈"}})
+    assert other.title.clean == "광주/전남 첫눈"
+
+
+def test_excluded_sources_come_from_the_caller():
+    article = {**API_REPORT["article"], "originChannelName": "순천", "isSameChannel": False}
+    raw = {**API_REPORT, "article": article}
+    assert build_item(raw).upload  # 순천 is not excluded by default
+    assert not build_item(raw, excluded_sources=["순천"]).upload
+    yeosu = {**raw, "article": {**article, "originChannelName": "여수"}}
+    assert build_item(yeosu, excluded_sources=[]).upload  # profile excludes nobody

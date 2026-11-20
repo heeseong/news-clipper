@@ -129,7 +129,8 @@ def test_upload_to_analysis(client, synthetic_video):
 
     steps = {s["step"]: s["status"] for s in job["steps"]}
     assert steps["proxy"] == steps["analyze"] == "SUCCEEDED"
-    assert {steps[s] for s in ("newsroom", "align", "metadata", "thumbnails")} == {"SKIPPED"}
+    assert steps["newsroom"] == "SUCCEEDED"  # fake newsroom (synthetic fixtures)
+    assert {steps[s] for s in ("align", "metadata", "thumbnails")} == {"SKIPPED"}
     assert job["status"] == "REVIEW_READY"
     assert job["artifacts"] == {
         "proxy": True,

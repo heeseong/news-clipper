@@ -46,6 +46,8 @@ PIPELINE: tuple[StageDef, ...] = (
     ),
 )
 FINAL_STATUS = JobStatus.REVIEW_READY
+# A step that waits for something outside the app (StepWaiting) puts the job in this status.
+WAITING_STATUS = JobStatus.WAITING_RUNDOWN
 
 STEPS: dict[str, tuple[int, StepDef]] = {
     step.name: (i, step) for i, stage in enumerate(PIPELINE) for step in stage.steps

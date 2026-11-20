@@ -28,6 +28,12 @@ class RetryableStepError(StepError):
     """Transient failure; the step is retried with backoff."""
 
 
+class StepWaiting(Exception):
+    """The step cannot run until something outside the app is ready (e.g. the cue sheet is not
+    registered yet). The step is marked WAITING and the job waits (WAITING_RUNDOWN) until it is
+    retried by hand."""
+
+
 class StepSkipped(Exception):
     """The step has nothing to do (e.g. not implemented yet); it is marked SKIPPED."""
 

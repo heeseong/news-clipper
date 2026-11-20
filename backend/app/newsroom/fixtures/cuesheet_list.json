@@ -1,0 +1,54 @@
+{
+  "status": "OK",
+  "success": true,
+  "data": [
+    {
+      "cueSheetId": 5001,
+      "programName": "뉴스데스크 ",
+      "programType": "TV",
+      "broadcastDate": "2026-11-02",
+      "broadcastStartTime": "19:30:00",
+      "broadcastEndTime": "2026-11-02T19:30",
+      "broadcastDurationTime": 0,
+      "channelCode": "MP",
+      "channelName": "목포",
+      "cueSheetVersion": 3,
+      "anchor1Name": "가나다",
+      "anchor2Name": "라마바",
+      "inputDateTime": "2026-11-02 09:12:40",
+      "updateDatetime": "2026-11-02 18:55:02"
+    },
+    {
+      "cueSheetId": 5002,
+      "programName": "뉴스투데이",
+      "programType": "TV",
+      "broadcastDate": "2026-11-02",
+      "broadcastStartTime": "06:00:00",
+      "broadcastEndTime": "2026-11-02T06:00",
+      "broadcastDurationTime": 0,
+      "channelCode": "MP",
+      "channelName": "목포",
+      "cueSheetVersion": 2,
+      "anchor1Name": "사아자",
+      "anchor2Name": null,
+      "inputDateTime": "2026-11-02 09:12:40",
+      "updateDatetime": "2026-11-02 18:55:02"
+    },
+    {
+      "cueSheetId": 5003,
+      "programName": "라디오 뉴스 ",
+      "programType": "라디오",
+      "broadcastDate": "2026-11-02",
+      "broadcastStartTime": "00:00:00",
+      "broadcastEndTime": "2026-11-02T00:00",
+      "broadcastDurationTime": 0,
+      "channelCode": "MP",
+      "channelName": "목포",
+      "cueSheetVersion": 0,
+      "anchor1Name": null,
+      "anchor2Name": null,
+      "inputDateTime": "2026-11-02 09:12:40",
+      "updateDatetime": "2026-11-02 18:55:02"
+    }
+  ]
+}

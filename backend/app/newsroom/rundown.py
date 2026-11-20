@@ -147,14 +147,34 @@ def source_from_article(article: dict[str, Any]) -> tuple[str | None, str | None
     return None, None
 
 
+def strip_reporter_suffix(title: Title, names: tuple[str | None, ...]) -> Title:
+    """'항구 정비 착공/최지훈' -> '항구 정비 착공' when 최지훈 is the item's reporter.
+
+    Only the reporter's own name is removed, so endings such as '광주/전남' stay.
+    """
+    for name in names:
+        if not name:
+            continue
+        m = re.search(rf"\s*/\s*{re.escape(name)}\s*$", title.clean)
+        if m:
+            return title.model_copy(update={"clean": title.clean[: m.start()].rstrip()})
+    return title
+
+
 def build_item(
-    raw: dict[str, Any], planned_seconds: int | None = None, department: str | None = None
+    raw: dict[str, Any],
+    planned_seconds: int | None = None,
+    department: str | None = None,
+    excluded_sources: tuple[str, ...] | list[str] | None = None,
 ) -> RundownItem:
     """Build a RundownItem from one IF_MARSL_003 `data[]` element.
 
     `planned_seconds` overrides the article's planned length (e.g. from the print-out).
     `department` is the reporter's unit when known from elsewhere (e.g. the print-out).
+    `excluded_sources` are stations whose reports are not uploaded (program profile setting);
+    None means the default `EXCLUDED_SOURCES`.
     """
+    excluded = EXCLUDED_SOURCES if excluded_sources is None else tuple(excluded_sources)
     article = raw.get("article") or {}
     content = article.get("articleContent")
     script = parse_script(content, article.get("memo")) if content and content.strip() else None
@@ -171,9 +191,15 @@ def build_item(
     source, source_reason = source_from_article(article)
     if source is None:
         source, source_reason = detect_source(title, unit, (department,))
-    if script is not None and item_type == ItemType.REPORT and reporter and script.signoff_reporter:
-        if script.signoff_reporter not in reporter:
-            script.warnings.append(f"SIGNOFF_REPORTER_MISMATCH:{script.signoff_reporter}!={reporter}")
+    signoff = script.signoff_reporter if script is not None else None
+    if script is not None and item_type == ItemType.REPORT and reporter and signoff:
+        if signoff not in reporter:
+            # The cue sheet can name the desk that filed the item; the voice is the sign-off's.
+            script.warnings.append(f"SIGNOFF_REPORTER_MISMATCH:{signoff}!={reporter}")
+            reporter = signoff
+    elif reporter is None and signoff:
+        reporter = signoff
+    title = strip_reporter_suffix(title, (reporter, signoff, article.get("reporterName")))
     if planned_seconds is None:
         planned_seconds = planned_from_article(article)
     return RundownItem(
@@ -187,7 +213,7 @@ def build_item(
         type_reason=reason,
         source=source,
         source_reason=source_reason,
-        upload=item_type == ItemType.REPORT and (source is None or source not in EXCLUDED_SOURCES),
+        upload=item_type == ItemType.REPORT and (source is None or source not in excluded),
         planned_seconds=planned_seconds,
         estimated_seconds=estimate_seconds(script),
         remark=(raw.get("remark") or None),

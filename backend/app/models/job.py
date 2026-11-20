@@ -48,6 +48,7 @@ class StepStatus(StrEnum):
     RETRYING = "RETRYING"  # failed with a transient error; automatic retry scheduled
     SUCCEEDED = "SUCCEEDED"
     SKIPPED = "SKIPPED"  # no handler yet (later milestone); counts as done
+    WAITING = "WAITING"  # waiting for something outside the app (the cue sheet); resumed by hand
     FAILED = "FAILED"
 
 
@@ -84,6 +85,10 @@ class Job(TimestampMixin, Base):
     @property
     def is_dummy(self) -> bool:
         return "dummy" in (self.params or {})
+
+    @property
+    def cue_sheet_id(self) -> int | None:
+        return (self.params or {}).get("cue_sheet_id")
 
 
 class JobStep(Base):
