@@ -25,7 +25,7 @@ _REPORT_MARK_RE = re.compile(r"^\s*R\s*\]\s*|\s*\(R(?:-\d+)?\)\s*$|^\s*\[?리포
 _SERIES_RE = re.compile(r"^\s*\[?(?P<series>[^\[\]\s]{1,10})\]\s*")
 _STATION_RE = re.compile(r"^\s*(?P<station>[가-힣]{2,4})\)\s*")
 # Desk notes written the same way as a station prefix ("최종)대불산단…"): removed, not a station.
-EDITORIAL_PREFIXES = ("최종", "수정", "재수정", "긴급", "속보", "단독", "추가", "보완", "확정")
+EDITORIAL_PREFIXES = ("최종", "수정", "재수정", "대체", "긴급", "속보", "단독", "추가", "보완", "확정")
 _REPORTER_UNIT_RE = re.compile(r"^\s*(?P<name>[^\s(]+)\s*\((?P<unit>[^)]+)\)\s*$")
 
 

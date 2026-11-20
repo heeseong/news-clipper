@@ -210,3 +210,34 @@ Observations (briefs only, no clip affected; rules not changed):
   and the text is crammed there: the same effect as the headline cramming of 11-04, at the end of
   the window. Brief 14 (in the recording, 1161-1183 s) became NOT_FOUND after it. The retry from
   later cuts does not help here because every retry window also reaches the end of the recording.
+
+## 2026-11-19 뉴스데스크 (golden set #6, blind, service code)
+
+Same procedure as 11-16. Cue sheet #2087976 (2판, 23 items) from the API; recording 21:13,
+~98 s of another newscast, headlines until ~151 s, ends after item 15. 5 upload reports
+(1, 2, 4, 5, 6). Log-probs: 182 s for 21.2 min.
+
+- Report 1: again a greeting begun over the studio wide shot with the anchor cut (153.52 s)
+  inside it; reference = silence between greeting and lead (154.215-155.152 s).
+- Report 4's script has no ◀리포트▶/◀END▶ markers (parse warning NO_REPORT_SECTION); the sign-off
+  is still found and the alignment is unaffected.
+- Footage cuts just before each sign-off (725.99, 840.57, 946.85) and inside the previous brief's
+  footage (506.37) were not taken.
+
+**10/10 boundaries correct on the first (blind) run** (start: silence / anchor cut +1 frame,
+end: next anchor cut -½ frame); report sentence medians -2.4 to -2.8.
+
+Observation (briefs only): brief 14 (weather, at 1199-1228 s) was aligned into the unrelated audio
+at the end of the recording (1256-1272 s) and flagged, and brief 15 (in the recording) after it:
+the same end-of-window cramming as 11-16, now seen twice. It would matter only for a report near
+the end of a truncated recording.
+
+Parser: the title prefix `대체)` (desk mark, replacement version) was read as a station name
+(source "대체" on brief 12); added to the editorial prefixes.
+
+### Totals with the service code
+
+| Golden set | Upload reports | Boundaries correct (blind first run) |
+|---|---|---|
+| 11-16 | 5 | 10/10 |
+| 11-19 | 5 | 10/10 |

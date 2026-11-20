@@ -333,7 +333,7 @@ def test_real_api_formatting_quirks():
     assert item.script.report[1].speaker == "김철수 / 시민"
     assert item.script.signoff_reporter == "홍길동" and item.script.warnings == []
 
-    for prefix in ("최종)", "수정)최종)"):
+    for prefix in ("최종)", "수정)최종)", "대체)"):
         brief = build_item({**API_REPORT, "remark": None,
                             "article": {**API_REPORT["article"], "articleTitle": f"{prefix}조선소 사고"}})
         assert brief.title.clean == "조선소 사고" and brief.title.station is None and brief.source is None
