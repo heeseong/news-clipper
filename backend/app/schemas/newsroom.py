@@ -20,8 +20,9 @@ class RundownSummaryOut(BaseModel):
 class RundownCounts(BaseModel):
     items: int = 0
     reports: int = 0  # 형식 R
-    uploads: int = 0  # own-station reports (upload targets)
-    excluded: int = 0  # reports from other stations
+    briefs: int = 0  # 형식 S (스트레이트)
+    uploads: int = 0  # own-station reports and briefs (upload targets)
+    excluded: int = 0  # reports and briefs from other stations
     planned_total_seconds: int | None = None
 
 

@@ -33,7 +33,7 @@ class ClipStatus(StrEnum):
 
 
 class Clip(TimestampMixin, Base):
-    """One upload candidate per own-station report (spec 5.6 6-a, 7).
+    """One upload candidate per own-station report or straight brief (spec 5.6 6-a, 7).
 
     start_sec/end_sec are None when the alignment was rejected (LOW_CONFIDENCE,
     DURATION_MISMATCH, NOT_FOUND): the reviewer sets the range by hand (spec 5-3-1).

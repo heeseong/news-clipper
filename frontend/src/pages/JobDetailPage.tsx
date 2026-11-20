@@ -170,7 +170,7 @@ function MediaPanel({ job }: { job: JobDetail }) {
       <div className="signals">
         <div className="tabs">
           <button className={tab === "clips" ? "active" : ""} onClick={() => setTab("clips")}>
-            리포트 클립 {clips.data ? `(${clips.data.length})` : ""}
+            클립 {clips.data ? `(${clips.data.length})` : ""}
           </button>
           <button className={tab === "cuts" ? "active" : ""} onClick={() => setTab("cuts")}>
             장면 전환 {analysis.data?.scenes ? `(${analysis.data.scenes.length})` : ""}
@@ -183,7 +183,7 @@ function MediaPanel({ job }: { job: JobDetail }) {
           !clips.data ? (
             <p className="muted small">정렬이 끝나면 표시됩니다</p>
           ) : clips.data.length === 0 ? (
-            <p className="muted small">업로드 대상 리포트가 없습니다</p>
+            <p className="muted small">업로드 대상 기사가 없습니다</p>
           ) : (
             <ol className="signal-list clip-list">
               {clips.data.map((c) => (

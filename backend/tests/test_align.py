@@ -50,7 +50,10 @@ def report(name: str, lead: str, body: str) -> list[Sentence]:
 
 
 R1 = report("홍길동", "새 다리가 오늘 개통했습니다.", "길이 일 킬로미터의 다리가 문을 열었습니다.")
-B2 = [S("군이 겨울 축제 준비에 들어갔습니다.", Section.LEAD, SentenceKind.ANCHOR)]
+B2 = [
+    S("군이 겨울 축제 준비에 들어갔습니다.", Section.LEAD, SentenceKind.ANCHOR),
+    S("올해는 체험 행사가 늘어나고 먹거리 장터도 새로 열립니다.", Section.LEAD, SentenceKind.ANCHOR),
+]
 R3 = report("김영희", "섬마을 의료 공백을 짚어봅니다.", "배로 한 시간을 가야 병원이 나옵니다.")
 R4 = report("최지훈", "항구 정비 사업이 시작됐습니다.", "낡은 방파제를 새로 쌓는 공사입니다.")
 
@@ -317,19 +320,23 @@ def test_align_step_creates_clips(aligned_job):
         assert [items[n].align_status for n in (1, 2, 3)] == ["ALIGNED"] * 3
         assert items[1].aligned_start == pytest.approx(b.starts[1], abs=ONSET_TOL)
         clips = {c.rundown_item.item_no: c for c in s.query(Clip).filter_by(job_id=job_id)}
-        assert set(clips) == {1, 3}
+        assert set(clips) == {1, 2, 3}  # reports and the straight brief
+        brief = clips[2]
+        assert brief.start_sec == pytest.approx(b.cuts[1] + 1 / FPS, abs=1e-3)
+        assert brief.end_sec == pytest.approx(b.cuts[2] - 0.5 / FPS, abs=1e-3)
+        assert brief.flags == []  # no sign-off is expected in a brief
         assert clips[1].start_sec == pytest.approx(b.cuts[0] + 1 / FPS, abs=1e-3)
         assert clips[1].end_sec == pytest.approx(b.cuts[1] - 0.5 / FPS, abs=1e-3)
         assert clips[1].flags == [] and clips[1].status == "DRAFT" and not clips[1].needs_manual_range
         sents = s.query(AlignedSentence).filter_by(rundown_item_id=items[1].id).order_by(AlignedSentence.seq).all()
         assert [x.kind for x in sents] == ["anchor", "intro", "narration", "signoff"]
     out = json.loads(JobFiles(job_id).alignment.read_text())
-    assert [c["order"] for c in out["clips"]] == [1, 3]
+    assert [c["order"] for c in out["clips"]] == [1, 2, 3]
 
     # Running the step again replaces the clips instead of adding more.
     tasks.retry_step(job_id, "align")
     with session_scope() as s:
-        assert s.query(Clip).filter_by(job_id=job_id).count() == 2
+        assert s.query(Clip).filter_by(job_id=job_id).count() == 3
 
 
 def test_align_step_uses_the_latest_edition(aligned_job):
@@ -344,7 +351,7 @@ def test_align_step_uses_the_latest_edition(aligned_job):
         assert rundown.edition == 3 and len(rundown.items) == 2
         assert rundown.changes[-1]["removed"] == [{"item_no": 2, "title": "축제 준비"}]
         clips = {c.rundown_item.item_no for c in s.query(Clip).filter_by(job_id=job_id)}
-        assert clips == {1, 2}
+        assert clips == {1, 2}  # the two reports left (the brief was removed)
 
 
 def test_align_step_without_model_fails_clearly(aligned_job, monkeypatch):
@@ -386,6 +393,7 @@ def test_clip_api(aligned_job, client):
     clips = client.get(f"/api/jobs/{job_id}/clips").json()
     assert [(c["item_no"], c["title"], c["needs_manual_range"]) for c in clips] == [
         (1, "새 다리 개통", False),
+        (2, "축제 준비", False),
         (3, "섬마을 의료", False),
     ]
     sents = client.get(f"/api/clips/{clips[0]['id']}/sentences").json()
@@ -397,3 +405,12 @@ def test_clip_api(aligned_job, client):
     pid = client.get("/api/programs").json()[0]["id"]
     r = client.put(f"/api/programs/{pid}", json={"name": "뉴스데스크", "pronunciations": {" LG ": "엘지"}})
     assert r.json()["pronunciations"] == {"LG": "엘지"}
+
+
+def test_briefs_are_clipped_without_signoff_flag():
+    b = broadcast([(1, R1, True), (2, B2, True), (3, R3, True)])
+    report_without_signoff = AlignItem(3, ItemType.REPORT, True, b.items[2].planned_seconds, None, R3[:-1])
+    items = [b.items[0], b.items[1], report_without_signoff]
+    clips = {c.order: c for c in plan_clips(b.lp, items, b.cuts, b.silences, FPS).clips}
+    assert clips[2].flags == [] and clips[2].start_snap == "scene" and clips[2].end_snap == "next_item_cut"
+    assert "NO_SIGNOFF" in clips[3].flags  # a report is expected to sign off

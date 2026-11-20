@@ -14,6 +14,9 @@ ANCHOR_RATE = 5.7
 REPORT_RATE = 5.7
 SENTENCE_PAUSE = 0.35  # seconds between sentences
 REPORT_TYPE_WORDS = ("리포트",)
+# Item types uploaded to YouTube: reports and straight briefs (2026-11-20, was reports only).
+# Title, headlines, closing (OTHER) are not; other stations' items are excluded by source.
+UPLOAD_TYPES = (ItemType.REPORT, ItemType.BRIEF)
 REPORT_TYPE_CODES = ("typ_002",)  # article.articleTypeCode for 리포트 (typ_001 = 스트레이트)
 # Items produced by these stations are not uploaded (still used as alignment anchors).
 # Per-program setting later (ProgramProfile).
@@ -217,7 +220,7 @@ def build_item(
         type_reason=reason,
         source=source,
         source_reason=source_reason,
-        upload=item_type == ItemType.REPORT and (source is None or source not in excluded),
+        upload=item_type in UPLOAD_TYPES and (source is None or source not in excluded),
         planned_seconds=planned_seconds,
         estimated_seconds=estimate_seconds(script),
         remark=(raw.get("remark") or None),

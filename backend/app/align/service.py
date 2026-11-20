@@ -83,7 +83,10 @@ def plan_clips(
     by_order = {a.order: a for a in alignments}
     uploads = [it for it in items if it.upload]
     planned = {it.order: it.planned_seconds for it in items}
-    boundaries = decide_boundaries(alignments, {it.order for it in uploads}, planned, cuts, silences, lp, fps)
+    reports = {it.order for it in items if it.item_type == ItemType.REPORT}
+    boundaries = decide_boundaries(
+        alignments, {it.order for it in uploads}, reports, planned, cuts, silences, lp, fps
+    )
     by_boundary = {b.order: b for b in boundaries}
 
     clips: list[ClipPlan] = []

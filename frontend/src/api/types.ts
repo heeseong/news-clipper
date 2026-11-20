@@ -132,6 +132,7 @@ export interface RundownSummary {
 export interface RundownCounts {
   items: number;
   reports: number;
+  briefs: number;
   uploads: number;
   excluded: number;
   planned_total_seconds: number | null;

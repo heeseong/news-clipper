@@ -230,9 +230,13 @@ def test_other_station_report_is_not_uploaded():
     assert not yeosu_reporter.upload
 
 
-def test_brief_is_never_uploaded():
+def test_own_briefs_are_uploaded_other_stations_are_not():
     raw = {"cueSheetItemOrderNumber": "7", "article": {"articleTitle": "단신", "articleContent": "단신입니다."}}
-    assert not build_item(raw).upload
+    assert build_item(raw).upload
+    gwangju = {**raw, "article": {**raw["article"], "articleTitle": "광주)단신"}}
+    assert not build_item(gwangju).upload
+    title_only = {"cueSheetItemOrderNumber": "1", "remark": "타이틀", "article": {"articleTitle": "타이틀"}}
+    assert not build_item(title_only).upload  # no script: OTHER
 
 
 # Shaped like a real IF_MARSL_003 element (synthetic text). The API keeps the editor's

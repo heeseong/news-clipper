@@ -85,7 +85,7 @@ def item_warnings(items: list[ParsedItem]) -> list[str]:
     if not items:
         warnings.append("큐시트에 아이템이 없습니다")
     elif not any(i.upload for i in items):
-        warnings.append("업로드 대상 리포트가 없습니다")
+        warnings.append("업로드 대상 기사가 없습니다")
     return warnings
 
 
@@ -236,13 +236,21 @@ def store(session: Session, job: Job, fetched: FetchedRundown) -> Rundown:
     return rundown
 
 
+def count_items(types: list[str], uploads: list[bool]) -> dict[str, Any]:
+    """Counts for the preview and the job page; `types` are R / S / OTHER per item."""
+    content = [u for t, u in zip(types, uploads, strict=True) if t in (ItemType.REPORT, ItemType.BRIEF)]
+    return {
+        "items": len(types),
+        "reports": sum(t == ItemType.REPORT for t in types),
+        "briefs": sum(t == ItemType.BRIEF for t in types),
+        "uploads": sum(uploads),
+        "excluded": sum(1 for u in content if not u),  # other stations' reports and briefs
+    }
+
+
 def summarize(items: list[ParsedItem]) -> dict[str, Any]:
     planned = [i.planned_seconds for i in items if i.planned_seconds]
-    reports = [i for i in items if i.item_type == ItemType.REPORT]
     return {
-        "items": len(items),
-        "reports": len(reports),
-        "uploads": sum(i.upload for i in items),
-        "excluded": sum(1 for i in reports if not i.upload),
+        **count_items([str(i.item_type) for i in items], [i.upload for i in items]),
         "planned_total_seconds": sum(planned) if planned else None,
     }

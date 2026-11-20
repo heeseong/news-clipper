@@ -10,7 +10,7 @@ from app.api.deps import AppSettings, DbSession
 from app.core.events import publish_job_changed
 from app.intake import IntakeError, create_job_from_upload
 from app.models import Job, JobStatus, Rundown
-from app.newsroom.models import ItemType
+from app.newsroom import service as newsroom_service
 from app.pipeline import tasks
 from app.pipeline.definition import PIPELINE, STEPS
 from app.pipeline.orchestrator import TransitionError, create_steps
@@ -158,12 +158,8 @@ def get_rundown(job_id: int, db: DbSession) -> RundownOut:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "아직 큐시트를 가져오지 않았습니다")
     out = RundownOut.model_validate(rundown)
     planned = [i.planned_duration for i in rundown.items if i.planned_duration]
-    reports = [i for i in rundown.items if i.type == ItemType.REPORT]
     out.counts = RundownCounts(
-        items=len(rundown.items),
-        reports=len(reports),
-        uploads=sum(i.upload for i in rundown.items),
-        excluded=sum(1 for i in reports if not i.upload),
+        **newsroom_service.count_items([i.type for i in rundown.items], [i.upload for i in rundown.items]),
         planned_total_seconds=sum(planned) if planned else None,
     )
     return out

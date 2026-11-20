@@ -241,3 +241,15 @@ Parser: the title prefix `대체)` (desk mark, replacement version) was read as 
 |---|---|---|
 | 11-16 | 5 | 10/10 |
 | 11-19 | 5 | 10/10 |
+
+## Straight briefs added to the upload targets (2026-11-20)
+
+The user extended the upload targets to own-station straight briefs (형식 S); the boundary rules
+are the same as for reports, ending at the last sentence instead of a sign-off. 11-16 and 11-19
+re-scored: reports unchanged (10/10 each). Briefs had no reference fixed beforehand, so they were
+checked after seeing the result (**not blind**): of the 14 briefs inside the recordings that got an
+automatic range, all start and end inside a silence (no speech cut), 14/14 start on the anchor-shot
+cut (+1 frame) and 12/14 end on the next anchor cut (-½ frame), checked on frames. The other two
+(11-19 S12, S13) end at last sentence + 0.4 s in the middle of the brief's footage: the next anchor
+cut is more than 3 s after the speech (S12: 2.6 s of silent footage after the speech; S13: the next
+item was not aligned). Briefs near the end of a truncated recording were rejected as before.

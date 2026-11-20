@@ -8,6 +8,7 @@ Ported from eval/poc/align_poc.py. Start:
 3. unless the acoustic model hears >= 4 syllables between that cut and the silence before the
    lead: a greeting, possibly begun over the studio wide shot (11-05, 11-11), so it is left out;
 4. without a usable cut: inside the silence before the lead (silence end - 0.5 s), else onset - 0.3 s.
+Briefs (straight items) use the same rules, ending at their last sentence instead of a sign-off.
 End: the cut that opens the next aligned item (found from that item's lead onset the same way)
 - ½ frame, if it lies within ±3 s of the sign-off end; otherwise sign-off end + 0.4 s (the
 sign-off, last in its window, can absorb up to ~2 s of the following audio).
@@ -81,13 +82,15 @@ def clip_start(
 def decide_boundaries(
     alignments: list[ItemAlignment],
     upload_orders: set[int],
+    report_orders: set[int],
     planned: dict[int, float | None],
     cuts: list[float],
     silences: list[tuple[float, float]],
     lp: LogProbs,
     fps: float,
 ) -> list[ClipBoundary]:
-    """Boundaries for the aligned upload reports (others are only anchors)."""
+    """Boundaries for the aligned upload items (reports and briefs; the rest are only anchors).
+    A brief has no sign-off: it ends with its last sentence (NO_SIGNOFF is for reports only)."""
     cut_arr = np.asarray(sorted(cuts), dtype=float)
     # Lead onset of every aligned item (after the silence correction): the next item's start.
     item_starts = [
@@ -107,7 +110,8 @@ def decide_boundaries(
             flags.append(Flag.LOW_CONFIDENCE)
         k = signoff_index(a.sentences)
         if k is None:
-            flags.append(Flag.NO_SIGNOFF)
+            if a.order in report_orders:
+                flags.append(Flag.NO_SIGNOFF)
             k = len(a.sentences) - 1
         signoff = a.sentences[k]
         start, start_snap = clip_start(lead_onset, cut_arr, silences, lp, fps)

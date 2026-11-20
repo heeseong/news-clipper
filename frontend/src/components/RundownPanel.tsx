@@ -67,7 +67,8 @@ export function RundownPanel({ job }: { job: JobDetail }) {
             </dd>
             <dt>아이템</dt>
             <dd>
-              {rundown.data.counts.items}개 · 리포트 {rundown.data.counts.reports}개 · 업로드 대상{" "}
+              {rundown.data.counts.items}개 · 리포트 {rundown.data.counts.reports}개 · 단신{" "}
+              {rundown.data.counts.briefs}개 · 업로드 대상{" "}
               <strong>{rundown.data.counts.uploads}</strong>개 · 예정 총 길이{" "}
               {formatMinSec(rundown.data.counts.planned_total_seconds)}
             </dd>
