@@ -20,6 +20,9 @@ ground_truth.json — decide it before looking at the result (blind):
         {"order": 5, "expect": "rejected", "note": "wrong cue sheet"}
       ]
     }
+A boundary that has no single right frame (the clip starts somewhere in the silence between a
+greeting and the lead) is given as a range: "clip_start_range": [163.606, 164.582]
+(likewise "clip_end_range").
 `clip_start` is the first frame the clip should show (the anchor-shot cut, or the silence before
 the lead), `clip_end` the cut that opens the next item. The PoC's keys `shot_start` / `next_cut`
 are accepted too. A boundary is correct within --tol seconds (default 0.05 s, 1.5 frames at
@@ -52,6 +55,12 @@ from app.media.ffmpeg import probe  # noqa: E402
 from app.newsroom.rundown import build_item, parse_duration  # noqa: E402
 
 VIDEO_EXT = (".mp4", ".mov", ".mxf", ".mkv", ".ts")
+
+
+def within(v: float, ref: float | list[float], tol: float) -> bool:
+    if isinstance(ref, list):
+        return ref[0] <= v <= ref[1]
+    return abs(v - ref) <= tol
 
 
 def find_recording(d: Path) -> Path:
@@ -138,22 +147,26 @@ def main() -> None:
     counts = {"ok": 0, "rejected": 0, "WRONG": 0, "unscored": 0}
     for c in result.clips:
         g = gt.get(c.order)
-        ref_s = (g or {}).get("clip_start", (g or {}).get("shot_start"))
-        ref_e = (g or {}).get("clip_end", (g or {}).get("next_cut"))
+        g = g or {}
+        ref_s = g.get("clip_start_range") or g.get("clip_start", g.get("shot_start"))
+        ref_e = g.get("clip_end_range") or g.get("clip_end", g.get("next_cut"))
         if c.start is None:
             verdict = "rejected"  # not wrong: nothing reaches upload without a reviewer's range
-        elif g is None or ref_s is None or ref_e is None:
+        elif not g or ref_s is None or ref_e is None:
             verdict = "unscored"
         else:
-            ok = abs(c.start - ref_s) <= args.tol and abs(c.end - ref_e) <= args.tol
+            ok = within(c.start, ref_s, args.tol) and within(c.end, ref_e, args.tol)
             verdict = "ok" if ok else "WRONG"
         counts[verdict] += 1
 
         def fmt(v, ref):
             if v is None:
                 return f"{'—':>9}         "
-            err = f"({v - ref:+.3f})" if ref is not None else ""
-            return f"{v:9.3f} {err:9}"
+            if isinstance(ref, list):
+                err = "(in range)" if ref[0] <= v <= ref[1] else f"({v - (ref[0] if v < ref[0] else ref[1]):+.3f})"
+            else:
+                err = f"({v - ref:+.3f})" if ref is not None else ""
+            return f"{v:9.3f} {err:10}"
 
         print(f"  {c.order:3d}   {fmt(c.start, ref_s)}   {fmt(c.end, ref_e)}   "
               f"{(c.start_snap or '-'):7} → {(c.end_snap or '-'):13}  {','.join(c.flags) or '-'}   {verdict}")
