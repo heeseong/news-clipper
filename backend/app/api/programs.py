@@ -9,7 +9,7 @@ from app.api.deps import DbSession
 from app.models import ProgramProfile
 from app.models.program import DEFAULT_DEDUPE_PROGRAM
 from app.schemas.program import ProgramIn, ProgramOut
-from app.thumbnails.overlay import DEFAULT_TEMPLATE
+from app.thumbnails.overlay import unknown_keys
 
 router = APIRouter(prefix="/api/programs", tags=["programs"])
 
@@ -24,10 +24,10 @@ def _apply_metadata_settings(program: ProgramProfile, body: ProgramIn) -> None:
     if body.default_tags is not None:
         program.default_tags = _sources(body.default_tags)
     if body.thumbnail_template is not None:
-        unknown = set(body.thumbnail_template) - set(DEFAULT_TEMPLATE)
+        unknown = unknown_keys(body.thumbnail_template)
         if unknown:
             raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_CONTENT, f"알 수 없는 썸네일 템플릿 항목: {', '.join(sorted(unknown))}"
+                status.HTTP_422_UNPROCESSABLE_CONTENT, f"알 수 없는 썸네일 템플릿 항목: {', '.join(unknown)}"
             )
         program.thumbnail_template = dict(body.thumbnail_template)
 

@@ -112,12 +112,21 @@ def generate(
     out.hashtags = hashtags
 
     thumb_warnings = factcheck.warnings_for("썸네일 문구", s.thumbnail_text, ref)
-    out.thumbnail_text_candidates.insert(0, _candidate(s.thumbnail_text, "llm", thumb_warnings))
-    # No memo in the script (spec 5.7): the generated line is the default unless it fails the check.
-    if not thumb_warnings and thumbnail_length(s.thumbnail_text) <= THUMBNAIL_TEXT_MAX:
+    llm_thumb = _candidate(s.thumbnail_text, "llm", thumb_warnings)
+    # The script memo is always empty (spec 5.7). The channel uses the title: a brief's caption is
+    # its title, a report's headline is its title split at the ellipsis. Only a report title
+    # without an ellipsis is replaced by the LLM's two lines, when they pass the check.
+    use_llm = (
+        script.kind == "report"
+        and defaults.split_at_separator(script.title) is None
+        and not thumb_warnings
+        and thumbnail_length(s.thumbnail_text) <= THUMBNAIL_TEXT_MAX
+    )
+    if use_llm:
         out.thumbnail_text = s.thumbnail_text
+        out.thumbnail_text_candidates.insert(0, llm_thumb)
     else:
-        out.thumbnail_text_candidates.reverse()
+        out.thumbnail_text_candidates.append(llm_thumb)
     out.warnings += [w for c in out.title_candidates for w in c["warnings"]]
     out.warnings += thumb_warnings
     return out

@@ -76,39 +76,61 @@ def frame(tmp_path: Path) -> Path:
     return path
 
 
+REPORT_T = overlay.template_for("report", None)
+BRIEF_T = overlay.template_for("brief", None)
+
+
+@pytest.fixture
+def grey(tmp_path: Path) -> Path:
+    path = tmp_path / "grey.jpg"
+    Image.new("RGB", (1280, 720), (128, 128, 128)).save(path)
+    return path
+
+
 def test_overlay_is_1280x720_jpeg_under_2mb(frame: Path, tmp_path: Path):
-    out = overlay.render_to(frame, "압해도 새 다리 개통", tmp_path / "thumb.jpg")
-    assert out.stat().st_size <= overlay.MAX_BYTES
-    with Image.open(out) as img:
-        assert img.size == (1280, 720) and img.format == "JPEG"
+    for tpl in (REPORT_T, BRIEF_T):
+        out = overlay.render_to(frame, "압해도 새 다리\n오늘 개통", tmp_path / "thumb.jpg", tpl)
+        assert out.stat().st_size <= overlay.MAX_BYTES
+        with Image.open(out) as img:
+            assert img.size == (1280, 720) and img.format == "JPEG"
 
 
-def test_overlay_wraps_long_text_and_draws_at_the_bottom(tmp_path: Path):
-    grey = tmp_path / "grey.jpg"
-    Image.new("RGB", (1280, 720), (128, 128, 128)).save(grey)
-    font, lines = overlay.layout("섬마을 응급 의료 공백 여전히 심각한 상황", overlay.template_with_defaults(None))
-    assert 1 < len(lines) <= 2
-    img = np.asarray(overlay.render(grey, "의료 공백"))
-    assert np.abs(img[:200].astype(int) - 128).max() < 10  # top untouched
-    assert img[600:].min() < 30 and img[600:].max() > 230  # white text with a black stroke
+def test_report_headline_two_lines_yellow_then_white(grey: Path):
+    img = np.asarray(overlay.render(grey, "'고병원성 AI' 잇단 확진\n한 달 빨라진 발생", REPORT_T)).astype(int)
+    lower = img[430:700, 40:900]
+    yellow = (lower[..., 0] > 200) & (lower[..., 1] > 170) & (lower[..., 2] < 90)
+    white = (lower > 220).all(axis=-1)
+    ys, ws = np.where(yellow)[0], np.where(white)[0]
+    assert len(ys) > 500 and len(ws) > 500
+    assert ys.mean() < ws.mean()  # the yellow line is above the white one
+    corner = img[10:60, 1180:1270]
+    assert corner[..., 2].mean() > corner[..., 0].mean() + 40  # blue band behind the logo
+    assert np.abs(img[150:250, 300:500] - 128).max() < 10  # the middle of the picture is untouched
 
 
-def test_overlay_template_top_left_and_logo(tmp_path: Path, monkeypatch):
+def test_brief_caption_bar_one_line_or_split_at_ellipsis(grey: Path):
+    short = np.asarray(overlay.render(grey, "겨울 축제 준비", BRIEF_T)).astype(int)
+    bar_rows = np.where((short[:, 640] > 235).all(axis=-1))[0]
+    assert bar_rows.min() > 520 and bar_rows.max() > 650  # white bar at the bottom
+    assert short[600, 60, 2] > 180 and short[600, 60, 0] < 90  # blue tab at the left
+    t = "국립의대 용역비 논란에 만든 예비비 통제 조례 폐지 추진…의회 다시 논의"
+    font, lines = overlay.layout(overlay._two_lines(t), BRIEF_T, 1100)
+    assert lines == ["국립의대 용역비 논란에 만든 예비비 통제 조례 폐지 추진…", "의회 다시 논의"]
+    font, lines = overlay.layout("짧은 제목", BRIEF_T | {"max_lines": 1}, 1100)
+    assert lines == ["짧은 제목"] and font.size == BRIEF_T["font_size"]
+
+
+def test_profile_template_overrides_and_logo(grey: Path, tmp_path: Path, monkeypatch):
     monkeypatch.setattr(overlay, "branding_dir", lambda: tmp_path)
     Image.new("RGBA", (200, 100), (255, 0, 0, 255)).save(tmp_path / "logo.png")
-    grey = tmp_path / "grey.jpg"
-    Image.new("RGB", (1280, 720), (128, 128, 128)).save(grey)
-    tpl = {"position": "top", "align": "left", "shade": 0, "logo": "logo.png", "logo_position": "bottom-right"}
-    img = np.asarray(overlay.render(grey, "속보", tpl))
-    assert img[660, 1180, 0] > 200 and img[660, 1180, 1] < 60  # red logo bottom right
-    assert img[60:180, 40:300].min() < 30  # text top left
-    assert np.abs(img[400:500, 600:700].astype(int) - 128).max() < 10
-
-
-def test_empty_text_leaves_the_frame(tmp_path: Path):
-    grey = tmp_path / "grey.jpg"
-    Image.new("RGB", (1280, 720), (128, 128, 128)).save(grey)
-    assert np.abs(np.asarray(overlay.render(grey, "")).astype(int) - 128).max() < 10
+    profile = {"logo": "logo.png", "brief": {"bar_color": "#000000"}, "report": {"corner_band": False}}
+    rep = overlay.template_for("report", profile)
+    assert rep["logo"] == "logo.png" and rep["corner_band"] is False and rep["style"] == "headline"
+    img = np.asarray(overlay.render(grey, "", rep)).astype(int)
+    assert img[60, 1180, 0] > 200 and img[60, 1180, 1] < 60  # red logo at the top right
+    assert overlay.template_for("brief", profile)["bar_color"] == "#000000"
+    assert overlay.unknown_keys(profile) == []
+    assert overlay.unknown_keys({"colour": 1, "brief": {"size": 2}, "report": 3}) == ["brief.size", "colour", "report"]
 
 
 # --- frames from the original ---
@@ -232,10 +254,10 @@ def test_rerunning_align_replaces_metadata_and_files(job_with_source):
 def test_program_metadata_settings_api(client):
     r = client.post("/api/programs", json={"name": "뉴스투데이", "default_tags": [" 뉴스 ", "뉴스", ""],
                                            "description_footer": "{program} {date}",
-                                           "thumbnail_template": {"position": "top"}})
+                                           "thumbnail_template": {"brief": {"bar_opacity": 0.8}}})
     assert r.status_code == 201, r.text
     body = r.json()
-    assert body["default_tags"] == ["뉴스"] and body["thumbnail_template"] == {"position": "top"}
+    assert body["default_tags"] == ["뉴스"] and body["thumbnail_template"] == {"brief": {"bar_opacity": 0.8}}
     r = client.put(f"/api/programs/{body['id']}", json={"name": "뉴스투데이", "thumbnail_template": {"colour": 1}})
     assert r.status_code == 422
     r = client.put(f"/api/programs/{body['id']}", json={"name": "뉴스투데이", "description_footer": ""})

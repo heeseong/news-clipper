@@ -12,7 +12,8 @@ function Candidates({ items, current }: { items: TextCandidate[]; current: strin
     <ul className="candidates">
       {items.map((c, i) => (
         <li key={i} className={c.text === current ? "current" : ""}>
-          <span className="tag">{SOURCE_LABEL[c.source] ?? c.source}</span> {c.text}{" "}
+          <span className="tag">{SOURCE_LABEL[c.source] ?? c.source}</span>{" "}
+          <span className="multiline">{c.text}</span>{" "}
           <span className="muted small">({c.text.length}자)</span>
           {c.warnings.map((w) => (
             <div key={w} className="small warn-text">

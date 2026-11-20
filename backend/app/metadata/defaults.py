@@ -3,7 +3,7 @@
 - title: the cleaned script title
 - description: the anchor lead (a brief: its whole text) + the program's footer template
 - tags: program default tags + reporter + region names found in the script (+ LLM keywords later)
-- thumbnail text: the script memo is always empty in the real API, so whole words of the title
+- thumbnail text: the script memo is always empty in the real API, so the title (see thumbnail_text)
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ import re
 from collections import defaultdict
 from dataclasses import dataclass
 
-from .llm import THUMBNAIL_TEXT_MAX, cut_words
+from .llm import THUMBNAIL_TEXT_MAX
 from .script import ClipScript
 
 YOUTUBE_TAGS_MAX_CHARS = 500  # all tags together
@@ -90,13 +90,46 @@ def tags(script: ClipScript, default_tags: list[str] | None, extra: list[str] | 
     return limit_tags(base + list(extra or []))
 
 
-def thumbnail_text(title: str) -> str:
-    """Whole words of the title that fit; the first clause when the title has one."""
-    for sep in (",", "…", "...", "·", '"', "'"):
-        head = title.split(sep)[0].strip()
-        if head and head != title and len(re.sub(r"\s", "", head)) <= THUMBNAIL_TEXT_MAX:
-            return head
-    return cut_words(title, THUMBNAIL_TEXT_MAX) or title[:THUMBNAIL_TEXT_MAX]
+SEPARATORS = ("…", "...", "..")  # not "·": 여수·순천
+
+
+def split_at_separator(text: str) -> tuple[str, str] | None:
+    """'A…B' → ('A…', 'B'): titles often join two phrases with an ellipsis."""
+    for sep in SEPARATORS:
+        head, found, tail = text.partition(sep)
+        if found and head.strip() and tail.strip():
+            return (head + sep).strip(), tail.strip()
+    return None
+
+
+def _balanced_lines(title: str) -> str:
+    """Two lines of about equal length, broken at a space."""
+    words = title.split()
+    if len(words) < 2:
+        return title
+    best = min(range(1, len(words)), key=lambda i: abs(len(" ".join(words[:i])) - len(" ".join(words[i:]))))
+    return " ".join(words[:best]) + "\n" + " ".join(words[best:])
+
+
+def thumbnail_text(title: str, kind: str = "report") -> str:
+    """What the channel puts on thumbnails (2026-11-20):
+    - a brief: the whole title (a caption bar at the bottom),
+    - a report: the title in two big lines, split at its ellipsis
+      ("공정성 외친 77일"...광장 떠나 장기전으로 → two lines); a short title stays one line."""
+    title = " ".join(title.split())
+    if kind == "brief":
+        return title
+    parts = split_at_separator(title)
+    if parts:
+        head, tail = parts
+        # Drop the ellipsis at the line end, except after a quote ("…77일"...), as the channel does.
+        bare = head.rstrip(".…")
+        if bare != head and not bare.endswith(("'", '"')):
+            head = bare
+        return f"{head}\n{tail}"
+    if len(title.replace(" ", "")) <= THUMBNAIL_TEXT_MAX:
+        return title
+    return _balanced_lines(title)
 
 
 def build(script: ClipScript, footer_template: str | None, default_tags: list[str] | None) -> Defaults:
@@ -104,5 +137,5 @@ def build(script: ClipScript, footer_template: str | None, default_tags: list[st
         title=script.title,
         description=description(script, footer_template),
         tags=tags(script, default_tags),
-        thumbnail_text=thumbnail_text(script.title),
+        thumbnail_text=thumbnail_text(script.title, script.kind),
     )
