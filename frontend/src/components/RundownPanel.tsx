@@ -68,7 +68,8 @@ export function RundownPanel({ job }: { job: JobDetail }) {
             <dt>아이템</dt>
             <dd>
               {rundown.data.counts.items}개 · 리포트 {rundown.data.counts.reports}개 · 단신{" "}
-              {rundown.data.counts.briefs}개 · 업로드 대상{" "}
+              {rundown.data.counts.briefs}개
+              {rundown.data.counts.aired > 0 && ` · 이미 방송돼 제외 ${rundown.data.counts.aired}개`} · 업로드 대상{" "}
               <strong>{rundown.data.counts.uploads}</strong>개 · 예정 총 길이{" "}
               {formatMinSec(rundown.data.counts.planned_total_seconds)}
             </dd>
@@ -150,7 +151,10 @@ function ItemTable({ items, fps }: { items: RundownItem[]; fps: number | null })
               <td title={it.source_reason ?? undefined}>{it.source ?? "자사"}</td>
               <td>{formatMinSec(it.planned_duration)}</td>
               <td>{formatMinSec(it.estimated_duration)}</td>
-              <td>{it.upload ? "대상" : "—"}</td>
+              <td title={it.dedupe_note ?? undefined}>
+                {it.upload ? "대상" : it.dedupe_note ? <span className="muted">방송분</span> : "—"}
+                {it.upload && it.dedupe_note && <span className="tag">재편집</span>}
+              </td>
               <td className="small">
                 {it.align_status === "ALIGNED" && it.aligned_start != null ? (
                   <span title={`문장 점수 중앙값 ${it.align_score?.toFixed(2)}`}>{timecode(it.aligned_start, fps)}</span>
@@ -189,6 +193,7 @@ function Script({ item }: { item: RundownItem }) {
       <p className="muted">
         형식 판별: {item.type_reason}
         {item.source_reason && ` · 출처: ${item.source_reason}`}
+        {item.dedupe_note && ` · ${item.dedupe_note}`}
       </p>
       {item.parse_warnings.length > 0 && <p className="error-text">경고: {item.parse_warnings.join(", ")}</p>}
       <ol>

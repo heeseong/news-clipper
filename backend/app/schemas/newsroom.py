@@ -22,6 +22,7 @@ class RundownCounts(BaseModel):
     reports: int = 0  # 형식 R
     briefs: int = 0  # 형식 S (스트레이트)
     uploads: int = 0  # own-station reports and briefs (upload targets)
+    aired: int = 0  # left out: already aired (e.g. the previous day's 뉴스데스크)
     excluded: int = 0  # reports and briefs from other stations
     planned_total_seconds: int | None = None
 
@@ -50,6 +51,7 @@ class RundownItemOut(BaseModel):
     source: str | None
     source_reason: str | None
     upload: bool
+    dedupe_note: str | None = None
     title: str
     title_raw: str | None
     series: str | None

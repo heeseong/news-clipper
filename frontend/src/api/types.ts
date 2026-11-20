@@ -114,6 +114,7 @@ export interface Program {
   broadcast_time: string | null;
   audio_track: number | null;
   excluded_sources: string[];
+  dedupe_program: string | null;
 }
 
 // --- newsroom (backend/app/schemas/newsroom.py) ---
@@ -134,6 +135,7 @@ export interface RundownCounts {
   reports: number;
   briefs: number;
   uploads: number;
+  aired: number;
   excluded: number;
   planned_total_seconds: number | null;
 }
@@ -173,6 +175,7 @@ export interface RundownItem {
   source: string | null;
   source_reason: string | null;
   upload: boolean;
+  dedupe_note: string | null;
   title: string;
   title_raw: string | null;
   series: string | null;

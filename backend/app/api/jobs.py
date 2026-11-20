@@ -159,7 +159,11 @@ def get_rundown(job_id: int, db: DbSession) -> RundownOut:
     out = RundownOut.model_validate(rundown)
     planned = [i.planned_duration for i in rundown.items if i.planned_duration]
     out.counts = RundownCounts(
-        **newsroom_service.count_items([i.type for i in rundown.items], [i.upload for i in rundown.items]),
+        **newsroom_service.count_items(
+            [i.type for i in rundown.items],
+            [i.upload for i in rundown.items],
+            [not i.upload and bool(i.dedupe_note) for i in rundown.items],
+        ),
         planned_total_seconds=sum(planned) if planned else None,
     )
     return out

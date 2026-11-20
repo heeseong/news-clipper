@@ -67,6 +67,39 @@
         "isSameChannel": true
       },
       "remark": null
+    },
+    {
+      "cueSheetId": 5002,
+      "cueSheetItemId": 203,
+      "cueSheetItemTitle": "R]전통시장 활기",
+      "cueSheetItemContent": null,
+      "cueSheetItemOrderNumber": "3",
+      "createUserName": "편집자",
+      "article": {
+        "articleId": 90203,
+        "articleTitle": "R]전통시장 활기",
+        "articleContent": "◀ 앵 커 ▶\n 주말을 맞아 전통시장이 활기를 띠었습니다.\n홍길동 기자입니다.\n◀ END ▶\n◀ 리포트 ▶\n 시장 골목이 손님들로 붐볐습니다.\n\n◀ INT ▶ 상인\n\"오랜만에 장사할 맛이 납니다.\"\n\nMBC뉴스 홍길동입니다.\n◀ END ▶",
+        "ancMentCttTime": 15,
+        "artclCttTime": 80,
+        "artclExtTime": 0,
+        "articleCategoryName": null,
+        "broadCastProgramName": null,
+        "memo": null,
+        "reporterName": "홍길동",
+        "reporterEmailAddress": null,
+        "originReporterName": "홍길동",
+        "inputDateTime": "2026-11-02 14:28:24",
+        "updateDatetime": "2026-11-02 18:40:31",
+        "articleTypeCode": "typ_002",
+        "articleTypeCodeName": "리포트",
+        "orgArticleId": 80107,
+        "channelName": "목포",
+        "chDivId": 15,
+        "originChannelName": "목포",
+        "orgChDivId": 15,
+        "isSameChannel": true
+      },
+      "remark": "리포트"
     }
   ]
 }

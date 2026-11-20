@@ -11,6 +11,8 @@ from app.core.db import Base
 from .base import TimestampMixin
 
 DEFAULT_EXCLUDED_SOURCES = ("광주", "여수")  # spec 3.2
+# The morning news repeats the previous evening's items: leave those out (2026-11-20).
+DEFAULT_DEDUPE_PROGRAM = {"뉴스투데이": "뉴스데스크"}
 
 
 class ProgramProfile(TimestampMixin, Base):
@@ -30,6 +32,8 @@ class ProgramProfile(TimestampMixin, Base):
     # Words read differently from their spelling, for alignment (e.g. {"KIA": "기아"}); added to
     # the built-in dictionary in app/align/korean_text.py.
     pronunciations: Mapped[dict[str, str]] = mapped_column(JSON, default=dict, server_default=text("'{}'"))
+    # Leave out items that aired in this program the previous day (e.g. 뉴스투데이 → "뉴스데스크").
+    dedupe_program: Mapped[str | None] = mapped_column(String(100))
     excluded_sources: Mapped[list[str]] = mapped_column(JSON, default=lambda: list(DEFAULT_EXCLUDED_SOURCES))
     description_footer: Mapped[str | None] = mapped_column(Text)
     default_tags: Mapped[list[str]] = mapped_column(JSON, default=list)

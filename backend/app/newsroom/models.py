@@ -86,6 +86,9 @@ class RundownItem(BaseModel):
     source: str | None = None  # other station that produced the item, e.g. "광주" (None = own)
     source_reason: str | None = None
     upload: bool = False  # own-station reports (R) and straight briefs (S)
+    # Comparison with another program's cue sheet (dedupe.py): why an item is left out as already
+    # aired, or a note that it is a re-edited version uploaded as new.
+    dedupe_note: str | None = None
     planned_seconds: int | None = None  # None when the source has no duration
     estimated_seconds: float | None = None  # reading-time estimate from the script
     remark: str | None = None

@@ -72,6 +72,7 @@ class RundownItem(Base):
     source: Mapped[str | None] = mapped_column(String(32))  # other station, None = own
     source_reason: Mapped[str | None] = mapped_column(String(255))
     upload: Mapped[bool] = mapped_column(Boolean, default=False)
+    dedupe_note: Mapped[str | None] = mapped_column(String(255))  # already aired / re-edited
     title: Mapped[str] = mapped_column(Text)  # cleaned
     title_raw: Mapped[str | None] = mapped_column(Text)
     series: Mapped[str | None] = mapped_column(String(32))
