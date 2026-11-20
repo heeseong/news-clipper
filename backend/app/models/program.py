@@ -10,6 +10,8 @@ from app.core.db import Base
 
 from .base import TimestampMixin
 
+DEFAULT_EXCLUDED_SOURCES = ("광주", "여수")  # spec 3.2
+
 
 class ProgramProfile(TimestampMixin, Base):
     """Per-program settings (spec 7). Edited in the admin screen (M9)."""
@@ -25,7 +27,7 @@ class ProgramProfile(TimestampMixin, Base):
     signoff_pattern: Mapped[str | None] = mapped_column(String(255))
     title_cleanup_rules: Mapped[list[Any]] = mapped_column(JSON, default=list)
     # Stations whose reports are not uploaded (e.g. ["광주", "여수"]).
-    excluded_sources: Mapped[list[str]] = mapped_column(JSON, default=list)
+    excluded_sources: Mapped[list[str]] = mapped_column(JSON, default=lambda: list(DEFAULT_EXCLUDED_SOURCES))
     description_footer: Mapped[str | None] = mapped_column(Text)
     default_tags: Mapped[list[str]] = mapped_column(JSON, default=list)
     thumbnail_template: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)

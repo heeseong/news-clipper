@@ -4,6 +4,7 @@ import * as tus from "tus-js-client";
 
 import { ApiError } from "../api/client";
 import { useCreateJob, useCreateProgram, usePrograms } from "../api/jobs";
+import { RundownPreview } from "../components/RundownPreview";
 import { formatBytes, todayKst } from "../labels";
 
 const ACCEPT = [".mp4", ".mov", ".mxf", ".mkv", ".ts"];
@@ -25,6 +26,7 @@ export function UploadPage() {
   const [file, setFile] = useState<File | null>(null);
   const [programId, setProgramId] = useState<number | null>(null);
   const [broadcastDate, setBroadcastDate] = useState(todayKst());
+  const [cueSheetId, setCueSheetId] = useState<number | null>(null); // picked by hand; null = automatic
   const [phase, setPhase] = useState<Phase>("idle");
   const [progress, setProgress] = useState<Progress | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -58,7 +60,7 @@ export function UploadPage() {
     const uploadId = uploadUrl.split("/").pop()!;
     setPhase("creating");
     createJob.mutate(
-      { upload_id: uploadId, program_id: programId, broadcast_date: broadcastDate },
+      { upload_id: uploadId, program_id: programId, broadcast_date: broadcastDate, cue_sheet_id: cueSheetId },
       {
         onSuccess: (job) => navigate(`/jobs/${job.id}`),
         onError: (e) => {
@@ -129,19 +131,38 @@ export function UploadPage() {
       <div className="form-row">
         <label>
           프로그램
-          <ProgramSelect value={programId} onChange={setProgramId} disabled={busy} />
+          <ProgramSelect
+            value={programId}
+            onChange={(id) => {
+              setProgramId(id);
+              setCueSheetId(null);
+            }}
+            disabled={busy}
+          />
         </label>
         <label>
           방송일
           <input
             type="date"
             value={broadcastDate}
-            onChange={(e) => setBroadcastDate(e.target.value)}
+            onChange={(e) => {
+              setBroadcastDate(e.target.value);
+              setCueSheetId(null);
+            }}
             disabled={busy}
             required
           />
         </label>
       </div>
+
+      <RundownPreview
+        programId={programId}
+        date={broadcastDate}
+        value={cueSheetId}
+        onChange={setCueSheetId}
+        disabled={busy || phase === "paused"}
+        missingHint="업로드는 할 수 있습니다. 작업은 '큐시트 대기' 상태로 기다리고, 큐시트가 등록된 뒤 작업 화면에서 다시 조회합니다."
+      />
 
       {progress && (
         <div className="upload-progress">

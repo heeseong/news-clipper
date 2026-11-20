@@ -39,6 +39,7 @@ class JobOut(BaseModel):
     source_size: int | None
     warnings: list[str]
     is_dummy: bool
+    cue_sheet_id: int | None = None  # picked by the user (upload form or refresh)
     created_at: datetime
     updated_at: datetime
 
@@ -62,6 +63,8 @@ class JobCreateIn(BaseModel):
     upload_id: str
     program_id: int | None = None
     broadcast_date: date
+    # The cue sheet picked in the upload form when several match (spec 5.4); None = match by name.
+    cue_sheet_id: int | None = None
 
 
 class SceneCut(BaseModel):

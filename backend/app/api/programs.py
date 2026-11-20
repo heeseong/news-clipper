@@ -12,6 +12,10 @@ from app.schemas.program import ProgramIn, ProgramOut
 router = APIRouter(prefix="/api/programs", tags=["programs"])
 
 
+def _sources(names: list[str]) -> list[str]:
+    return list(dict.fromkeys(n.strip() for n in names if n.strip()))
+
+
 @router.get("", response_model=list[ProgramOut])
 def list_programs(db: DbSession) -> list[ProgramProfile]:
     return list(db.scalars(select(ProgramProfile).order_by(ProgramProfile.name)))
@@ -23,6 +27,8 @@ def create_program(body: ProgramIn, db: DbSession) -> ProgramProfile:
     if db.scalar(select(ProgramProfile).where(ProgramProfile.name == name)):
         raise HTTPException(status.HTTP_409_CONFLICT, f"이미 있는 프로그램입니다: {name}")
     program = ProgramProfile(name=name, broadcast_time=body.broadcast_time, audio_track=body.audio_track)
+    if body.excluded_sources is not None:
+        program.excluded_sources = _sources(body.excluded_sources)
     db.add(program)
     db.commit()
     return program
@@ -36,5 +42,7 @@ def update_program(program_id: int, body: ProgramIn, db: DbSession) -> ProgramPr
     program.name = body.name.strip()
     program.broadcast_time = body.broadcast_time
     program.audio_track = body.audio_track
+    if body.excluded_sources is not None:
+        program.excluded_sources = _sources(body.excluded_sources)
     db.commit()
     return program

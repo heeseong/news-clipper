@@ -18,12 +18,13 @@ from celery import chord
 
 from app.core.db import session_scope
 from app.core.events import publish_job_changed
+from app.models import Job
 from app.worker import celery_app
 
 from . import handlers  # noqa: F401  (registers step handlers)
 from . import orchestrator as orch
 from .definition import CONTROL_QUEUE, STEPS
-from .steps import RetryableStepError, StepSkipped, resolve_handler
+from .steps import RetryableStepError, StepSkipped, StepWaiting, resolve_handler
 
 log = logging.getLogger(__name__)
 
@@ -46,10 +47,15 @@ def start_job(job_id: int) -> None:
     dispatch_stage(job_id, 0)
 
 
-def retry_step(job_id: int, step: str) -> None:
-    """Manual retry from a step (API). Raises TransitionError/LookupError."""
+def retry_step(job_id: int, step: str, params: dict | None = None) -> None:
+    """Manual retry from a step (API). Raises TransitionError/LookupError.
+
+    `params` are merged into the job's params first (e.g. the cue sheet the user picked)."""
     with session_scope() as session:
         stage_idx = orch.prepare_retry(session, job_id, step)
+        if params:
+            job = session.get(Job, job_id)
+            job.params = {**(job.params or {}), **params}
     dispatch_stage(job_id, stage_idx)
 
 
@@ -72,6 +78,12 @@ def run_step(self, job_id: int, step: str) -> str:
         publish_job_changed(job_id)
         log.info("step skipped", extra={**extra, "reason": str(e)})
         return "skipped"
+    except StepWaiting as e:
+        with session_scope() as session:
+            orch.mark_waiting(session, job_id, step, str(e))
+        publish_job_changed(job_id)
+        log.info("step waiting", extra={**extra, "reason": str(e)})
+        return "waiting"
     except RetryableStepError as e:
         _, step_def = STEPS[step]
         if self.request.retries < step_def.max_retries:
@@ -123,4 +135,8 @@ def advance(job_id: int, stage_idx: int) -> str:
         outcome = orch.stage_outcome(session, job_id, stage_idx)
     if outcome == "succeeded":  # all steps succeeded or were skipped
         dispatch_stage(job_id, stage_idx + 1)
+    elif outcome == "waiting":
+        with session_scope() as session:
+            orch.wait_job(session, job_id, stage_idx)
+        publish_job_changed(job_id)
     return outcome

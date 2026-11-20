@@ -24,6 +24,8 @@ OWN_DEPARTMENTS = ("보도부", "보도국", "취재부", "편집부", "영상�
 _REPORT_MARK_RE = re.compile(r"^\s*R\s*\]\s*|\s*\(R(?:-\d+)?\)\s*$|^\s*\[?리포트\]\s*")
 _SERIES_RE = re.compile(r"^\s*\[?(?P<series>[^\[\]\s]{1,10})\]\s*")
 _STATION_RE = re.compile(r"^\s*(?P<station>[가-힣]{2,4})\)\s*")
+# Desk notes written the same way as a station prefix ("최종)대불산단…"): removed, not a station.
+EDITORIAL_PREFIXES = ("최종", "수정", "재수정", "긴급", "속보", "단독", "추가", "보완", "확정")
 _REPORTER_UNIT_RE = re.compile(r"^\s*(?P<name>[^\s(]+)\s*\((?P<unit>[^)]+)\)\s*$")
 
 
@@ -34,6 +36,9 @@ def clean_title(raw: str) -> Title:
         prev, text = text, _REPORT_MARK_RE.sub("", text).strip()
     station = None
     m = _STATION_RE.match(text)
+    while m and m.group("station") in EDITORIAL_PREFIXES:
+        text = text[m.end() :].strip()
+        m = _STATION_RE.match(text)
     if m:
         station = m.group("station")
         text = text[m.end() :].strip()
@@ -147,14 +152,34 @@ def source_from_article(article: dict[str, Any]) -> tuple[str | None, str | None
     return None, None
 
 
+def strip_reporter_suffix(title: Title, names: tuple[str | None, ...]) -> Title:
+    """'항구 정비 착공/최지훈' -> '항구 정비 착공' when 최지훈 is the item's reporter.
+
+    Only the reporter's own name is removed, so endings such as '광주/전남' stay.
+    """
+    for name in names:
+        if not name:
+            continue
+        m = re.search(rf"\s*/\s*{re.escape(name)}\s*$", title.clean)
+        if m:
+            return title.model_copy(update={"clean": title.clean[: m.start()].rstrip()})
+    return title
+
+
 def build_item(
-    raw: dict[str, Any], planned_seconds: int | None = None, department: str | None = None
+    raw: dict[str, Any],
+    planned_seconds: int | None = None,
+    department: str | None = None,
+    excluded_sources: tuple[str, ...] | list[str] | None = None,
 ) -> RundownItem:
     """Build a RundownItem from one IF_MARSL_003 `data[]` element.
 
     `planned_seconds` overrides the article's planned length (e.g. from the print-out).
     `department` is the reporter's unit when known from elsewhere (e.g. the print-out).
+    `excluded_sources` are stations whose reports are not uploaded (program profile setting);
+    None means the default `EXCLUDED_SOURCES`.
     """
+    excluded = EXCLUDED_SOURCES if excluded_sources is None else tuple(excluded_sources)
     article = raw.get("article") or {}
     content = article.get("articleContent")
     script = parse_script(content, article.get("memo")) if content and content.strip() else None
@@ -171,9 +196,13 @@ def build_item(
     source, source_reason = source_from_article(article)
     if source is None:
         source, source_reason = detect_source(title, unit, (department,))
-    if script is not None and item_type == ItemType.REPORT and reporter and script.signoff_reporter:
-        if script.signoff_reporter not in reporter:
-            script.warnings.append(f"SIGNOFF_REPORTER_MISMATCH:{script.signoff_reporter}!={reporter}")
+    signoff = script.signoff_reporter if script is not None else None
+    cue_sheet_reporter = reporter
+    if signoff and (reporter is None or signoff not in reporter):
+        # The cue sheet usually names the desk that filed the item (11-04: 4 of 5 reports);
+        # the reporter is the one who signs off. Not a warning: cue_sheet_reporter keeps the other.
+        reporter = signoff
+    title = strip_reporter_suffix(title, (reporter, signoff, article.get("reporterName")))
     if planned_seconds is None:
         planned_seconds = planned_from_article(article)
     return RundownItem(
@@ -183,11 +212,12 @@ def build_item(
         article_type=article_type,
         title=title,
         reporter=reporter,
+        cue_sheet_reporter=cue_sheet_reporter if cue_sheet_reporter != reporter else None,
         item_type=item_type,
         type_reason=reason,
         source=source,
         source_reason=source_reason,
-        upload=item_type == ItemType.REPORT and (source is None or source not in EXCLUDED_SOURCES),
+        upload=item_type == ItemType.REPORT and (source is None or source not in excluded),
         planned_seconds=planned_seconds,
         estimated_seconds=estimate_seconds(script),
         remark=(raw.get("remark") or None),

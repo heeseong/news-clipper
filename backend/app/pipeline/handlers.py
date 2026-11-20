@@ -4,6 +4,8 @@ Implemented:
 - proxy: 360p proxy video, waveform (spec 5.2), and from the same decode of the original: the
   thumbnail sprite and scene cuts (spec 5.3). The source is decoded and deinterlaced once.
 - analyze: alignment audio and silences (spec 5.3).
+- newsroom: find the job's cue sheet, fetch its items and scripts, parse and store them (spec 5.4).
+  No cue sheet yet → the step WAITs and the job becomes WAITING_RUNDOWN (spec 10).
 Other steps are SKIPPED until their milestone.
 """
 
@@ -18,9 +20,12 @@ from app.core.db import session_scope
 from app.media import analysis, proxy
 from app.media.ffmpeg import FfmpegError, ProbeResult
 from app.models import Job
+from app.newsroom import service as newsroom
+from app.newsroom.factory import get_provider
+from app.newsroom.provider import NewsroomError, NewsroomUnavailable
 from app.storage import JobFiles
 
-from .steps import StepContext, StepError, register
+from .steps import RetryableStepError, StepContext, StepError, StepWaiting, register
 
 log = logging.getLogger(__name__)
 
@@ -119,4 +124,30 @@ def analyze_step(ctx: StepContext) -> None:
             "silences": len(silences["silences"]),
         },
     )
+    ctx.report(1.0)
+
+
+@register("newsroom")
+def newsroom_step(ctx: StepContext) -> None:
+    with session_scope() as session:
+        job = session.get(Job, ctx.job_id)
+        if job is None:
+            raise StepError("작업을 찾을 수 없습니다")
+        if job.broadcast_date is None:
+            raise StepError("방송일이 없어 큐시트를 찾을 수 없습니다")
+        broadcast_date = job.broadcast_date
+        program = newsroom.ProgramInfo.of(job.program)
+    cue_sheet_id = ctx.params.get("cue_sheet_id")
+    try:
+        fetched = newsroom.fetch(get_provider(), broadcast_date, program, cue_sheet_id)
+    except newsroom.RundownNotFound as e:
+        raise StepWaiting(f"큐시트 대기: {e}") from e
+    except NewsroomUnavailable as e:
+        raise RetryableStepError(str(e)) from e
+    except NewsroomError as e:
+        raise StepError(str(e)) from e
+    ctx.report(0.5)
+    newsroom.write_files(ctx.job_id, fetched)
+    with session_scope() as session:
+        newsroom.store(session, session.get(Job, ctx.job_id), fetched)
     ctx.report(1.0)

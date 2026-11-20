@@ -18,6 +18,7 @@ export type StepStatus =
   | "RETRYING"
   | "SUCCEEDED"
   | "SKIPPED"
+  | "WAITING"
   | "FAILED";
 
 export interface JobStep {
@@ -48,6 +49,7 @@ export interface Job {
   source_size: number | null;
   warnings: string[];
   is_dummy: boolean;
+  cue_sheet_id: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -86,6 +88,7 @@ export interface JobCreateRequest {
   upload_id: string;
   program_id: number | null;
   broadcast_date: string;
+  cue_sheet_id?: number | null;
 }
 
 export interface SceneCut {
@@ -110,4 +113,101 @@ export interface Program {
   name: string;
   broadcast_time: string | null;
   audio_track: number | null;
+  excluded_sources: string[];
+}
+
+// --- newsroom (backend/app/schemas/newsroom.py) ---
+
+export interface RundownSummary {
+  cue_sheet_id: number;
+  program_name: string;
+  program_type: string | null;
+  broadcast_date: string | null;
+  broadcast_start_time: string | null;
+  version: number;
+  anchors: string[];
+  updated_at: string | null;
+}
+
+export interface RundownCounts {
+  items: number;
+  reports: number;
+  uploads: number;
+  excluded: number;
+  planned_total_seconds: number | null;
+}
+
+export interface RundownPreview {
+  broadcast_date: string;
+  program_name: string | null;
+  matched: RundownSummary | null;
+  reason: string;
+  ambiguous: boolean;
+  candidates: RundownSummary[];
+  day_rundowns: RundownSummary[];
+  counts: RundownCounts | null;
+  warnings: string[];
+}
+
+export interface ScriptSentence {
+  section: "lead" | "report";
+  kind: string;
+  text: string;
+  speaker: string | null;
+}
+
+export interface ParsedScript {
+  structured: boolean;
+  sentences: ScriptSentence[];
+  signoff_reporter: string | null;
+  warnings: string[];
+  syllable_count: number;
+}
+
+export interface RundownItem {
+  id: number;
+  item_no: number;
+  type: "R" | "S" | "OTHER";
+  type_reason: string | null;
+  source: string | null;
+  source_reason: string | null;
+  upload: boolean;
+  title: string;
+  title_raw: string | null;
+  series: string | null;
+  reporter: string | null;
+  cue_sheet_reporter: string | null;
+  planned_duration: number | null;
+  estimated_duration: number | null;
+  remark: string | null;
+  parsed_script: ParsedScript | null;
+  parse_warnings: string[];
+}
+
+export interface RundownChange {
+  at: string;
+  from: number;
+  to: number;
+  added: { item_no: number; title: string }[];
+  removed: { item_no: number; title: string }[];
+  moved: { title: string; from: number; to: number }[];
+  edited: { item_no: number; title: string }[];
+  cue_sheet?: { from: number; to: number };
+}
+
+export interface Rundown {
+  id: number;
+  job_id: number;
+  newsroom_rundown_id: number;
+  program_name: string;
+  broadcast_date: string | null;
+  broadcast_start_time: string | null;
+  edition: number;
+  confirmed_at: string | null;
+  fetched_at: string;
+  match_reason: string | null;
+  changes: RundownChange[];
+  warnings: string[];
+  items: RundownItem[];
+  counts: RundownCounts;
 }

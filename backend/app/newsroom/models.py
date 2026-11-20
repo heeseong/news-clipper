@@ -79,7 +79,8 @@ class RundownItem(BaseModel):
     article_id: int | None = None  # article.articleId
     article_type: str | None = None  # article.articleTypeCodeName, e.g. 리포트 / 스트레이트
     title: Title
-    reporter: str | None
+    reporter: str | None  # sign-off reporter when the script has one
+    cue_sheet_reporter: str | None = None  # reporterName when it differs (usually the desk)
     item_type: ItemType
     type_reason: str  # why item_type was chosen (for review / debugging)
     source: str | None = None  # other station that produced the item, e.g. "광주" (None = own)

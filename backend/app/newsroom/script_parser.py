@@ -43,7 +43,8 @@ SUPER_RE = re.compile(r"\*[^*]*\*")
 BRACKET_RE = re.compile(r"\[[^\[\]]*\]")  # [영상] 홈런 style directives
 SLASH_RE = re.compile(r"(?<!\d)/+|/+(?!\d)")
 SIGNOFF_RE = re.compile(r"^(?:MBC|엠비씨)\s*뉴스\s*(?P<name>[가-힣]{2,4})\s*(?:기자\s*)?입니다\.?$", re.IGNORECASE)
-INTRO_RE = re.compile(r"기자가\s.*니다\.?$")
+# "○○○ 기자가 보도합니다." / "○○○ 기자입니다." / "이어서 ○○○ 기자 입니다." (spacing varies)
+INTRO_RE = re.compile(r"기자(?:가\s.*니다|\s*입니다)\.?$")
 SENTENCE_RE = re.compile(r".+?(?:[.?!]+[\"”’']?(?=\s|$)|$)")
 
 _SPEECH_MARKERS = {

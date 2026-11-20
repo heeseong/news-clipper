@@ -12,6 +12,7 @@ dependencies = [
     "alembic>=1.13",
     "psycopg[binary]>=3.2",
     "celery[redis]>=5.4",
+    "httpx>=0.27",  # MARS-L client
 ]
 
 [project.optional-dependencies]
@@ -27,6 +28,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["app*"]
+
+[tool.setuptools.package-data]
+"app.newsroom" = ["fixtures/*.json"]  # synthetic MARS-L responses for the fake newsroom
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

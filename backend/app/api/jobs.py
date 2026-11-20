@@ -9,7 +9,8 @@ from sqlalchemy.orm import Session
 from app.api.deps import AppSettings, DbSession
 from app.core.events import publish_job_changed
 from app.intake import IntakeError, create_job_from_upload
-from app.models import Job, JobStatus
+from app.models import Job, JobStatus, Rundown
+from app.newsroom.models import ItemType
 from app.pipeline import tasks
 from app.pipeline.definition import PIPELINE, STEPS
 from app.pipeline.orchestrator import TransitionError, create_steps
@@ -25,6 +26,7 @@ from app.schemas.job import (
     SilenceRange,
     StageOut,
 )
+from app.schemas.newsroom import RundownCounts, RundownOut, RundownRefreshIn
 from app.storage import JobFiles
 
 router = APIRouter(prefix="/api", tags=["jobs"])
@@ -78,7 +80,9 @@ def get_job(job_id: int, db: DbSession) -> JobOut:
 def create_job(body: JobCreateIn, db: DbSession) -> JobOut:
     """Create a job from a finished tus upload and start the pipeline."""
     try:
-        job = create_job_from_upload(db, body.upload_id, body.program_id, body.broadcast_date)
+        job = create_job_from_upload(
+            db, body.upload_id, body.program_id, body.broadcast_date, cue_sheet_id=body.cue_sheet_id
+        )
     except IntakeError as e:
         db.rollback()
         raise HTTPException(e.status, str(e)) from e
@@ -139,6 +143,42 @@ def retry_step(job_id: int, step: str, db: DbSession) -> JobOut:
         tasks.retry_step(job_id, step)
     except LookupError as e:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(e)) from e
+    except TransitionError as e:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
+    db.expire_all()
+    return _job_out(_get_job(db, job_id), JobDetailOut)
+
+
+@router.get("/jobs/{job_id}/rundown", response_model=RundownOut)
+def get_rundown(job_id: int, db: DbSession) -> RundownOut:
+    """The job's cue sheet with every item and its parsed script (404 until the newsroom step ran)."""
+    _get_job(db, job_id)
+    rundown = db.scalar(select(Rundown).where(Rundown.job_id == job_id))
+    if rundown is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "아직 큐시트를 가져오지 않았습니다")
+    out = RundownOut.model_validate(rundown)
+    planned = [i.planned_duration for i in rundown.items if i.planned_duration]
+    reports = [i for i in rundown.items if i.type == ItemType.REPORT]
+    out.counts = RundownCounts(
+        items=len(rundown.items),
+        reports=len(reports),
+        uploads=sum(i.upload for i in rundown.items),
+        excluded=sum(1 for i in reports if not i.upload),
+        planned_total_seconds=sum(planned) if planned else None,
+    )
+    return out
+
+
+@router.post("/jobs/{job_id}/rundown/refresh", response_model=JobDetailOut)
+def refresh_rundown(job_id: int, body: RundownRefreshIn, db: DbSession) -> JobOut:
+    """Look the cue sheet up again (optionally a specific one) and redo the steps after it.
+
+    Used when the job waits for its cue sheet (WAITING_RUNDOWN) or the cue sheet was edited.
+    """
+    _get_job(db, job_id)
+    params = {"cue_sheet_id": body.cue_sheet_id} if body.cue_sheet_id is not None else None
+    try:
+        tasks.retry_step(job_id, "newsroom", params)
     except TransitionError as e:
         raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
     db.expire_all()

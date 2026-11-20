@@ -76,7 +76,11 @@ def check_warnings(
 
 
 def create_job_from_upload(
-    session: Session, upload_id: str, program_id: int | None, broadcast_date: date
+    session: Session,
+    upload_id: str,
+    program_id: int | None,
+    broadcast_date: date,
+    cue_sheet_id: int | None = None,
 ) -> Job:
     try:
         info = uploads.load(upload_id)
@@ -108,6 +112,7 @@ def create_job_from_upload(
         width=p.width,
         height=p.height,
         warnings=check_warnings(session, info.filename, p, broadcast_date, fp),
+        params={"cue_sheet_id": cue_sheet_id} if cue_sheet_id is not None else {},
     )
     create_steps(job)
     session.add(job)

@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 
 import { useAnalysis, useJob, usePipeline, useRetryStep } from "../api/jobs";
 import type { JobDetail, JobStep } from "../api/types";
+import { RundownPanel } from "../components/RundownPanel";
 import { JobStatusBadge, StepStatusBadge } from "../components/StatusBadge";
 import {
   STAGE_LABEL,
@@ -62,7 +63,9 @@ export function JobDetailPage() {
           ))}
         </ul>
       )}
-      {data.error && <p className="error-box">{data.error}</p>}
+      {data.error && (
+        <p className={data.status === "WAITING_RUNDOWN" ? "warn-box" : "error-box"}>{data.error}</p>
+      )}
 
       <div className="stages">
         {stages.map((stage, i) => (
@@ -86,6 +89,7 @@ export function JobDetailPage() {
       </div>
       {retry.isError && <p className="error-box">재시도하지 못했습니다: {retry.error.message}</p>}
 
+      {!data.is_dummy && <RundownPanel job={data} />}
       {!data.is_dummy && <MediaPanel job={data} />}
     </section>
   );
@@ -108,7 +112,11 @@ function StepCard({ step, onRetry, retrying }: { step: JobStep; onRetry: () => v
         큐 {step.queue} · 시도 {step.attempts}회 · {running ? `${Math.round(step.progress! * 100)}%` : formatSeconds(step.started_at, step.finished_at)}
       </div>
       {step.error && (
-        <div className={`small ${step.status === "SKIPPED" ? "muted" : "error-text"}`}>{step.error}</div>
+        <div
+          className={`small ${step.status === "SKIPPED" ? "muted" : step.status === "WAITING" ? "warn-text" : "error-text"}`}
+        >
+          {step.error}
+        </div>
       )}
       {step.status === "FAILED" && (
         <button className="btn btn-small" onClick={onRetry} disabled={retrying}>
