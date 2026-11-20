@@ -1,4 +1,4 @@
-"""Report clips (spec 8). Review actions (edit, approve) come with M5."""
+"""Report clips (spec 8): ranges, sentences, metadata and thumbnails. Review actions come with M5."""
 
 from __future__ import annotations
 
@@ -7,17 +7,51 @@ from sqlalchemy import select
 
 from app.api.deps import DbSession
 from app.models import AlignedSentence, Clip, Job, RundownItem
-from app.schemas.newsroom import AlignedSentenceOut, ClipOut
+from app.schemas.newsroom import AlignedSentenceOut, ClipDetailOut, ClipMetadataOut, ClipOut, ThumbnailOut
+from app.storage import JobFiles
 
 router = APIRouter(prefix="/api", tags=["clips"])
 
 
-def clip_out(clip: Clip) -> ClipOut:
-    out = ClipOut.model_validate(clip)
+def _version(dt) -> str:
+    return str(int(dt.timestamp())) if dt else "0"
+
+
+def thumbnail_url(clip: Clip) -> str | None:
+    """The rendered thumbnail (selected frame + text); ?v= changes when it is re-rendered."""
+    path = JobFiles(clip.job_id).thumbnail(clip.id)
+    if not path.exists():
+        return None
+    return f"/media/clips/{clip.id}/thumbnail.jpg?v={int(path.stat().st_mtime)}"
+
+
+def clip_out(clip: Clip, model: type[ClipOut] = ClipOut) -> ClipOut:
+    # Not model.model_validate(clip): `Clip.metadata` is SQLAlchemy's table MetaData.
+    out = model.model_validate(ClipOut.model_validate(clip).model_dump())
     item: RundownItem = clip.rundown_item
     out.item_no, out.title, out.reporter = item.item_no, item.title, item.reporter
     out.planned_duration = item.planned_duration
+    out.youtube_title = clip.metadata_.title if clip.metadata_ else None
+    out.thumbnail_url = thumbnail_url(clip)
     return out
+
+
+def clip_detail(clip: Clip) -> ClipDetailOut:
+    out = clip_out(clip, ClipDetailOut)
+    assert isinstance(out, ClipDetailOut)
+    out.metadata = ClipMetadataOut.model_validate(clip.metadata_) if clip.metadata_ else None
+    out.thumbnails = [
+        ThumbnailOut.model_validate(t).model_copy(update={"url": f"/media/thumbnails/{t.id}?v={_version(t.updated_at)}"})
+        for t in clip.thumbnails
+    ]
+    return out
+
+
+def _clip(db, clip_id: int) -> Clip:
+    clip = db.get(Clip, clip_id)
+    if clip is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "클립을 찾을 수 없습니다")
+    return clip
 
 
 @router.get("/jobs/{job_id}/clips", response_model=list[ClipOut])
@@ -30,19 +64,14 @@ def list_clips(job_id: int, db: DbSession) -> list[ClipOut]:
     return [clip_out(c) for c in clips]
 
 
-@router.get("/clips/{clip_id}", response_model=ClipOut)
-def get_clip(clip_id: int, db: DbSession) -> ClipOut:
-    clip = db.get(Clip, clip_id)
-    if clip is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "클립을 찾을 수 없습니다")
-    return clip_out(clip)
+@router.get("/clips/{clip_id}", response_model=ClipDetailOut)
+def get_clip(clip_id: int, db: DbSession) -> ClipDetailOut:
+    return clip_detail(_clip(db, clip_id))
 
 
 @router.get("/clips/{clip_id}/sentences", response_model=list[AlignedSentenceOut])
 def clip_sentences(clip_id: int, db: DbSession) -> list[AlignedSentence]:
-    clip = db.get(Clip, clip_id)
-    if clip is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "클립을 찾을 수 없습니다")
+    clip = _clip(db, clip_id)
     return list(
         db.scalars(
             select(AlignedSentence)
@@ -50,3 +79,19 @@ def clip_sentences(clip_id: int, db: DbSession) -> list[AlignedSentence]:
             .order_by(AlignedSentence.seq)
         )
     )
+
+
+@router.get("/clips/{clip_id}/thumbnails", response_model=list[ThumbnailOut])
+def clip_thumbnails(clip_id: int, db: DbSession) -> list[ThumbnailOut]:
+    return clip_detail(_clip(db, clip_id)).thumbnails
+
+
+@router.post("/clips/{clip_id}/metadata/regenerate", status_code=status.HTTP_202_ACCEPTED)
+def regenerate_metadata(clip_id: int, db: DbSession) -> dict:
+    """Script defaults and LLM candidates again (plan 4.6). Runs on the `ai` queue; the job's
+    event stream announces the result. Publishing settings (privacy, schedule) are kept."""
+    from app.pipeline.tasks import regenerate_clip_metadata
+
+    clip = _clip(db, clip_id)
+    regenerate_clip_metadata.apply_async(args=(clip.id,), queue="ai")
+    return {"clip_id": clip.id, "queued": True}

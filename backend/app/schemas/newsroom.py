@@ -112,6 +112,8 @@ class ClipOut(BaseModel):
     confidence: float | None
     flags: list[str]
     needs_manual_range: bool
+    youtube_title: str | None = None  # metadata title, once generated
+    thumbnail_url: str | None = None  # selected frame with the text overlay
 
 
 class AlignedSentenceOut(BaseModel):
@@ -124,3 +126,50 @@ class AlignedSentenceOut(BaseModel):
     start_sec: float
     end_sec: float
     score: float
+
+
+class TextCandidateOut(BaseModel):
+    text: str
+    source: str  # script | title | llm
+    warnings: list[str] = []
+
+
+class ClipMetadataOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    title: str
+    title_candidates: list[TextCandidateOut]
+    description: str
+    summary: str | None
+    tags: list[str]
+    hashtags: list[str]
+    thumbnail_text: str
+    thumbnail_text_candidates: list[TextCandidateOut]
+    privacy: str
+    publish_at: datetime | None
+    llm_status: str  # ok | failed | off
+    llm_provider: str | None
+    llm_model: str | None
+    llm_input_tokens: int
+    llm_output_tokens: int
+    warnings: list[str]
+    generated_at: datetime | None
+
+
+class ThumbnailOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    source: str
+    rank: int
+    frame_sec: float | None
+    score: float | None
+    details: dict[str, Any]
+    overlay_text: str | None
+    selected: bool
+    url: str = ""  # the frame without text
+
+
+class ClipDetailOut(ClipOut):
+    metadata: ClipMetadataOut | None = None
+    thumbnails: list[ThumbnailOut] = []

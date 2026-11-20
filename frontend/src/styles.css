@@ -532,3 +532,66 @@ div.rundown-preview.warn-box {
 .clip-list .tag {
   margin-right: 0.3rem;
 }
+
+/* Clip metadata and thumbnails (M4) */
+.clip-head {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+.clip-thumb {
+  width: 112px;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 4px;
+  flex: none;
+}
+.clip-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.4rem 0 0.2rem;
+}
+.thumb-final {
+  width: 100%;
+  max-width: 480px;
+  border-radius: 4px;
+}
+.thumb-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.35rem;
+}
+.thumb-grid .thumb {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 2px;
+  border: 2px solid transparent;
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+.thumb-grid .thumb.selected {
+  border-color: var(--accent, #2563eb);
+}
+.thumb-grid img {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 2px;
+}
+.candidates {
+  margin: 0;
+  padding-left: 1rem;
+}
+.candidates li.current {
+  font-weight: 600;
+}
+.clip-meta pre.description {
+  white-space: pre-wrap;
+  margin: 0;
+  font-family: inherit;
+}

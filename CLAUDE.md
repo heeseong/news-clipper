@@ -5,7 +5,7 @@
 
 ## 먼저 읽을 것
 - `spec.md` — 기능 명세(v1.0). 정렬·경계 규칙의 근거는 5.5절
-- `plan.md` — 마일스톤과 진행 상태. M0~M3 완료(로그인 보류, M3는 원래 골든셋 4편 재현만 남음). 다음 작업은 **M4(메타데이터·썸네일)**: M4 절의 **"M4 시작 가이드"**에 지금 상태, 연결점, 만들 것, 사용자에게 받을 것이 정리돼 있다. 각 마일스톤의 "정한 것"에 규칙이 있다
+- `plan.md` — 마일스톤과 진행 상태. M0~M4 구현(로그인 보류, M3는 원래 골든셋 4편 재현, M4는 실제 Claude 호출·실제 녹화본 썸네일 확인이 남음). 다음 작업은 **M5(검수 화면)**. 각 마일스톤의 "정한 것"에 규칙이 있다
 - `eval/poc/RESULTS.md` — 정렬 PoC 결과와 방송별 실패 사례
 
 ## 핵심 결정 (바꾸기 전에 사용자와 확인)
@@ -16,10 +16,11 @@
 - 모든 클립은 검수·승인 후 업로드. 정렬 판정에 실패한 기사는 자동으로 자르지 않고 검수자가 직접 지정
 - 스택: Python 3.12 / FastAPI / Celery+Redis / PostgreSQL / FFmpeg, React+Vite+TS, Docker Compose
 - 외부 연동(MARS-L, Claude, YouTube)은 인터페이스 + Fake 구현을 먼저 만든다
+- 메타데이터 기본값은 원고에서, LLM(Claude) 결과는 후보로만(제목 정책 spec 16-5 미정). LLM 실패는 경고만 남기고 단계는 성공. LLM에는 원고 텍스트만 보낸다
 
 ## 저장소 구조 (현재)
 - `backend/app/core/` — 설정(`config.py`, 환경변수), JSON 로깅, DB 세션
-- `backend/app/models/` — SQLAlchemy 모델(User, ProgramProfile, Job, JobStep, Rundown, RundownItem, Clip, AlignedSentence). 바꾸면 Alembic 마이그레이션(`backend/alembic/versions/000N_설명.py`, 현재 0005)도 만든다
+- `backend/app/models/` — SQLAlchemy 모델(User, ProgramProfile, Job, JobStep, Rundown, RundownItem, Clip, AlignedSentence, ClipMetadata, Thumbnail). 바꾸면 Alembic 마이그레이션(`backend/alembic/versions/000N_설명.py`, 현재 0006)도 만든다
 - `backend/app/pipeline/` — 단계 정의(`definition.py`), 상태 전이(`orchestrator.py`, Celery 없음), Celery 태스크(`tasks.py`), 단계 처리기(`handlers.py`, `@register("proxy")`). 처리기가 없는 단계는 SKIPPED
 - `backend/app/media/` — ffprobe·ffmpeg 래퍼(`ffmpeg.py`), 프록시·스프라이트·파형(`proxy.py`), 정렬용 오디오·장면 전환·무음(`analysis.py`)
 - `backend/app/uploads.py`, `api/uploads.py` — tus 업로드. `intake.py` — 업로드 → 작업 생성(ffprobe 검증, 경고). `storage.py` — 저장 경로
@@ -28,7 +29,9 @@
 - `backend/app/newsroom/` — 원고 파서(`script_parser.py`), 큐시트 아이템 판별·제목 정리·출처 판별(`rundown.py`), 모델(`models.py`), Provider 인터페이스·정규화(`provider.py`), MARS-L 클라이언트(`marsl.py`), Fake(`fake.py` + 합성 `fixtures/`), 큐시트 매칭(`matching.py`), 조회·저장(`service.py`), 전날 방송분 제외(`dedupe.py`). 설정 `NEWSROOM_PROVIDER=fake|marsl`
 - `backend/app/models/rundown.py` — Rundown, RundownItem (작업당 큐시트 1개)
 - `backend/app/align/` — 정렬(M3): 발음 변환(`korean_text.py`), log-prob(`logprobs.py`), wav2vec2 모델(`acoustic.py`, torch는 선택 의존성 `[model]`), 아이템 순차 정렬·판정(`aligner.py`), 경계 결정(`boundaries.py`), 클립 생성·저장(`service.py`). 상수는 PoC 그대로 — 바꾸면 골든셋을 다시 돌린다
-- `backend/app/models/clip.py` — Clip(DRAFT, 판정 실패면 구간 null), AlignedSentence
+- `backend/app/models/clip.py` — Clip(DRAFT, 판정 실패면 구간 null), AlignedSentence. `models/metadata.py` — ClipMetadata, Thumbnail (Clip에 CASCADE)
+- `backend/app/metadata/` — 메타데이터(M4): 클립 원고(`script.py`), 원고 기반 기본값(`defaults.py`), 사실성 검사(`factcheck.py`), LLM 인터페이스·Fake(`llm.py`), Claude(`claude.py`), 선택(`factory.py`, 설정 `LLM_PROVIDER=off|fake|claude`), 단계·재생성(`service.py`)
+- `backend/app/thumbnails/` — 썸네일(M4): 후보 시각·추출·점수(`candidates.py`, 얼굴 YuNet `models/`), 오버레이(`overlay.py`, 폰트 `fonts/`), 단계(`service.py`)
 - `backend/tests/` — 단위 테스트. `tests/fixtures/synthetic.py`는 FFmpeg 합성 테스트 영상(컷·무음 위치를 알고 있음)
 - `frontend/` — React + Vite + TS. `src/api/`(API 클라이언트·TanStack Query 훅), `src/pages/`
 - `docker-compose.yml` — 서버 한 대 배포(postgres, redis, migrate, api, 워커 4개, web)
@@ -60,6 +63,7 @@ cd backend && .venv/bin/python ../eval/tools/score_alignment.py ../eval/data/<�
 - Hugging Face 모델은 `HF_HUB_DISABLE_XET=1`로 받는다. 모델은 `kresnik/wav2vec2-large-xlsr-korean`(1.2GB)
 - deb.debian.org가 막혀 있어 세션 안에서는 백엔드 Docker 이미지(FFmpeg 설치)를 빌드할 수 없다. 이미지 빌드는 CI에서 확인한다. Docker 데몬은 `dockerd`로 직접 띄워야 한다
 - `gh`는 GraphQL이 막혀 있다. PR 생성·병합은 REST(`gh api repos/heeseong/news-clipper/pulls ...`)로 한다
+- Anthropic API 키는 아직 없다. 받을 때는 `request_credential`(호스트 `api.anthropic.com`, 헤더 `x-api-key`)로 받고 `LLM_PROVIDER=claude ANTHROPIC_API_KEY=proxy-injected`로 실행한다
 - MARS-L 키는 환경의 네트워크 비밀(`api.marsl.co.kr`, 헤더 `Mars-Secret`)로 저장돼 있다(2026-11-20). 실제 API는 `NEWSROOM_PROVIDER=marsl MARSL_API_KEY=proxy-injected`로 호출한다(프록시가 실제 키를 넣는다. 키는 채팅으로 받지 않는다)
 - 이미지에 Python 3.13, Node 22, FFmpeg 6, PostgreSQL 16, Redis 7, Chromium(Playwright)이 있다. 환경의 설정 스크립트가 새 세션 시작 때 `backend/.venv`(uv)와 `frontend/node_modules`(npm ci)를 설치한다(2026-11-19 추가). 없으면 위 "명령"의 `uv venv`, `npm install`로 설치한다
 - 실제 워커·DB로 확인할 때 (테스트에는 필요 없음):

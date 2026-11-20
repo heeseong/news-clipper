@@ -4,6 +4,7 @@ import { Link, useParams } from "react-router-dom";
 import { useAnalysis, useJob, usePipeline, useRetryStep } from "../api/jobs";
 import { useJobClips } from "../api/newsroom";
 import type { JobDetail, JobStep } from "../api/types";
+import { ClipMetaPanel } from "../components/ClipMetaPanel";
 import { RundownPanel } from "../components/RundownPanel";
 import { JobStatusBadge, StepStatusBadge } from "../components/StatusBadge";
 import {
@@ -144,7 +145,12 @@ function MediaPanel({ job }: { job: JobDetail }) {
       : null;
   const analysis = useAnalysis(job.id, version);
   const alignStep = job.steps.find((s) => s.step === "align");
-  const clips = useJobClips(job.id, alignStep?.status === "SUCCEEDED" ? (alignStep.finished_at ?? "done") : null);
+  // Clips come from align; titles and thumbnails from the metadata and thumbnails steps.
+  const clipSteps = job.steps.filter((s) => ["align", "metadata", "thumbnails"].includes(s.step));
+  const clipsVersion =
+    alignStep?.status === "SUCCEEDED" ? clipSteps.map((s) => `${s.status}:${s.finished_at}`).join("|") : null;
+  const clips = useJobClips(job.id, clipsVersion);
+  const [openClip, setOpenClip] = useState<number | null>(null);
 
   const seek = (t: number) => {
     if (!video.current) return;
@@ -188,10 +194,23 @@ function MediaPanel({ job }: { job: JobDetail }) {
             <ol className="signal-list clip-list">
               {clips.data.map((c) => (
                 <li key={c.id}>
-                  <div>
-                    <strong>
-                      {c.item_no}. {c.title}
-                    </strong>
+                  <div className="clip-head">
+                    {c.thumbnail_url && <img className="clip-thumb" src={c.thumbnail_url} alt="" />}
+                    <div>
+                      <strong>
+                        {c.item_no}. {c.title}
+                      </strong>
+                      {c.youtube_title && c.youtube_title !== c.title && (
+                        <div className="small">{c.youtube_title}</div>
+                      )}
+                      {(c.youtube_title || c.thumbnail_url) && (
+                        <div>
+                          <button className="link small" onClick={() => setOpenClip(openClip === c.id ? null : c.id)}>
+                            {openClip === c.id ? "메타데이터 닫기" : "메타데이터·썸네일 보기"}
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                   {c.start_sec != null && c.end_sec != null ? (
                     <div className="small">
@@ -230,6 +249,9 @@ function MediaPanel({ job }: { job: JobDetail }) {
                         </span>
                       ))}
                     </div>
+                  )}
+                  {openClip === c.id && clipsVersion && (
+                    <ClipMetaPanel clipId={c.id} version={clipsVersion} fps={job.fps} seek={seek} />
                   )}
                 </li>
               ))}

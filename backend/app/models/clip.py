@@ -12,6 +12,7 @@ from app.core.db import Base
 from .base import TimestampMixin, str_enum
 
 if TYPE_CHECKING:
+    from .metadata import ClipMetadata, Thumbnail
     from .rundown import RundownItem
 
 
@@ -60,6 +61,11 @@ class Clip(TimestampMixin, Base):
     locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     rundown_item: Mapped[RundownItem] = relationship()
+    # Rows are removed by the database (ON DELETE CASCADE) when clips are deleted in bulk.
+    metadata_: Mapped[ClipMetadata | None] = relationship(passive_deletes=True)
+    thumbnails: Mapped[list[Thumbnail]] = relationship(
+        order_by="Thumbnail.rank", viewonly=True
+    )
 
     @property
     def needs_manual_range(self) -> bool:

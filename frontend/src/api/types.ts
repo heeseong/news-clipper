@@ -211,6 +211,51 @@ export interface Clip {
   confidence: number | null;
   flags: string[];
   needs_manual_range: boolean;
+  youtube_title: string | null;
+  thumbnail_url: string | null;
+}
+
+export interface TextCandidate {
+  text: string;
+  source: "script" | "title" | "llm";
+  warnings: string[];
+}
+
+export interface ClipMetadata {
+  title: string;
+  title_candidates: TextCandidate[];
+  description: string;
+  summary: string | null;
+  tags: string[];
+  hashtags: string[];
+  thumbnail_text: string;
+  thumbnail_text_candidates: TextCandidate[];
+  privacy: string;
+  publish_at: string | null;
+  llm_status: "ok" | "failed" | "off";
+  llm_provider: string | null;
+  llm_model: string | null;
+  llm_input_tokens: number;
+  llm_output_tokens: number;
+  warnings: string[];
+  generated_at: string | null;
+}
+
+export interface ThumbnailCandidate {
+  id: number;
+  source: string;
+  rank: number;
+  frame_sec: number | null;
+  score: number | null;
+  details: Record<string, number>;
+  overlay_text: string | null;
+  selected: boolean;
+  url: string;
+}
+
+export interface ClipDetail extends Clip {
+  metadata: ClipMetadata | null;
+  thumbnails: ThumbnailCandidate[];
 }
 
 export interface RundownChange {

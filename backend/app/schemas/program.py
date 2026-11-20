@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import time
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -18,6 +19,15 @@ class ProgramIn(BaseModel):
     excluded_sources: list[str] | None = Field(
         None, description="Stations whose reports are not uploaded; none = default (광주, 여수) / unchanged"
     )
+    description_footer: str | None = Field(
+        None,
+        description="YouTube description footer; placeholders {station} {program} {date} {reporter} "
+        "{reporter_credit} {title}. '' = built-in default; none = unchanged",
+    )
+    default_tags: list[str] | None = Field(None, description="Tags on every clip; none = unchanged")
+    thumbnail_template: dict[str, Any] | None = Field(
+        None, description="Thumbnail overlay design (app/thumbnails/overlay.py); none = unchanged"
+    )
 
 
 class ProgramOut(ProgramIn):
@@ -27,3 +37,6 @@ class ProgramOut(ProgramIn):
     dedupe_program: str | None
     excluded_sources: list[str]
     pronunciations: dict[str, str]
+    description_footer: str | None
+    default_tags: list[str]
+    thumbnail_template: dict[str, Any]
