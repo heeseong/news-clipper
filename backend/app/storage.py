@@ -7,6 +7,8 @@ jobs/{job_id}/proxy/proxy.mp4, sprite.jpg, sprite.json, waveform.json
 jobs/{job_id}/audio/align.wav
 jobs/{job_id}/analysis/scenes.json, silences.json, logprobs.npz, alignment.json
 jobs/{job_id}/newsroom/rundown.json, scripts/{item_no}.json
+jobs/{job_id}/clips/{clip_id}/thumb_candidates/{rank}.jpg, thumbnail.jpg
+branding/                      logos and fonts for thumbnail templates
 """
 
 from __future__ import annotations
@@ -91,6 +93,22 @@ class JobFiles:
     def script(self, item_no: int) -> Path:
         """Parsed item (RundownItem with its ParsedScript)."""
         return self.scripts_dir / f"{item_no}.json"
+
+
+    @property
+    def clips_dir(self) -> Path:
+        return self.dir / "clips"
+
+    def clip_dir(self, clip_id: int) -> Path:
+        return self.clips_dir / str(clip_id)
+
+    def thumb_candidates_dir(self, clip_id: int) -> Path:
+        """Candidate frames (1280x720, no text)."""
+        return self.clip_dir(clip_id) / "thumb_candidates"
+
+    def thumbnail(self, clip_id: int) -> Path:
+        """The selected candidate with the text overlay (what is uploaded)."""
+        return self.clip_dir(clip_id) / "thumbnail.jpg"
 
 
 # Files the browser may fetch via /media/jobs/{id}/{name}

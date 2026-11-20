@@ -140,3 +140,24 @@ def advance(job_id: int, stage_idx: int) -> str:
             orch.wait_job(session, job_id, stage_idx)
         publish_job_changed(job_id)
     return outcome
+
+
+@celery_app.task(name="clips.regenerate_metadata")
+def regenerate_clip_metadata(clip_id: int) -> str:
+    """Plan 4.6: the metadata of one clip again (also after the reviewer sets a range, M5)."""
+    from app.metadata import service as metadata
+    from app.metadata.factory import get_llm_provider
+    from app.models import Clip
+    from app.thumbnails import service as thumbnails
+
+    with session_scope() as session:
+        clip = session.get(Clip, clip_id)
+        if clip is None:
+            return "missing"
+        job_id = clip.job_id
+        meta = metadata.generate_for_clip(session, clip, get_llm_provider())
+        status = meta.llm_status
+    with session_scope() as session:
+        thumbnails.render_selected(session, clip_id)
+    publish_job_changed(job_id)
+    return status

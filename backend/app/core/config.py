@@ -55,6 +55,24 @@ class Settings(BaseSettings):
     align_threads: int = 4
     align_chunk_seconds: float = 20.0
 
+    # Metadata (spec 5.7). The LLM only adds candidates; without it the script-based defaults are
+    # used. "off" = no LLM, "fake" = deterministic suggestions from the script (dev, tests),
+    # "claude" = Claude API (only the script text is sent).
+    llm_provider: Literal["off", "fake", "claude"] = "fake"
+    anthropic_api_key: SecretStr | None = None  # sent as x-api-key; never logged
+    llm_model: str = "claude-opus-5-5"
+    llm_effort: Literal["low", "medium", "high"] = "medium"
+    llm_timeout_seconds: float = 60.0
+    llm_max_retries: int = 3  # SDK retries for 429 / 5xx / timeouts (exponential backoff)
+    # Re-run a refused request on another model (server-side fallback, Claude API only).
+    llm_refusal_fallback: bool = True
+    # Station name in the description footer ({station}).
+    station_name: str = "목포MBC"
+
+    # Thumbnails (spec 5.7)
+    thumbnail_candidates: int = 6
+    thumbnail_samples: int = 12  # evenly spaced frames per clip, besides frames after scene cuts
+
     # Run Celery tasks in-process (tests, or running the API without workers).
     celery_always_eager: bool = False
 

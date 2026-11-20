@@ -8,12 +8,17 @@ Implemented:
   No cue sheet yet → the step WAITs and the job becomes WAITING_RUNDOWN (spec 10).
 - align: re-check the cue sheet edition, compute (or reuse) the acoustic model's log-probs, align
   the scripts and create DRAFT clips for the upload reports (spec 5.5).
-Other steps are SKIPPED until their milestone.
+- metadata: script-based title, description, tags and thumbnail text per clip, plus LLM candidates
+  (spec 5.7). An LLM failure only warns.
+- thumbnails: candidate frames from the original per clip, scored; the best is selected and gets
+  the text overlay (spec 5.7).
+Clips without a range (rejected alignment) are skipped by both until the reviewer sets one (M5).
 """
 
 from __future__ import annotations
 
 import logging
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -24,11 +29,14 @@ from app.core.config import get_settings
 from app.core.db import session_scope
 from app.media import analysis, proxy
 from app.media.ffmpeg import FfmpegError, ProbeResult
+from app.metadata import service as metadata
+from app.metadata.factory import get_llm_provider
 from app.models import Job
 from app.newsroom import service as newsroom
 from app.newsroom.factory import get_provider
 from app.newsroom.provider import NewsroomError, NewsroomUnavailable
 from app.storage import JobFiles
+from app.thumbnails import service as thumbnails
 
 from .steps import RetryableStepError, StepContext, StepError, StepWaiting, register
 
@@ -225,6 +233,8 @@ def align_step(ctx: StepContext) -> None:
     with session_scope() as session:
         job = session.get(Job, ctx.job_id)
         aligning.store_result(session, job, aligning.job_rundown(session, ctx.job_id), result)
+    # New clips: their metadata and thumbnails are made again (clip ids may be reused).
+    shutil.rmtree(files.clips_dir, ignore_errors=True)
     log.info(
         "alignment done",
         extra={
@@ -235,3 +245,49 @@ def align_step(ctx: StepContext) -> None:
         },
     )
     ctx.report(1.0)
+
+
+def _render_overlay(clip_id: int) -> None:
+    with session_scope() as session:
+        thumbnails.render_selected(session, clip_id)
+
+
+@register("metadata")
+def metadata_step(ctx: StepContext) -> None:
+    provider = get_llm_provider()
+    with session_scope() as session:
+        clip_ids = metadata.clips_to_process(session, ctx.job_id)
+    done = 0
+
+    def stored(clip_id: int) -> None:
+        nonlocal done
+        _render_overlay(clip_id)  # after the commit (see thumbnails.service)
+        done += 1
+        ctx.report(done / len(clip_ids))
+
+    metadata.generate_for_clips(clip_ids, provider, on_stored=stored)
+
+
+@register("thumbnails")
+def thumbnails_step(ctx: StepContext) -> None:
+    s = get_settings()
+    files = JobFiles(ctx.job_id)
+    with session_scope() as session:
+        thumbnails.remove_stale_dirs(session, ctx.job_id)
+        ranges = thumbnails.clip_ranges(session, ctx.job_id)
+    if not ranges:
+        return
+    src = load_source(ctx)
+    cuts, _ = aligning.load_signals(files.scenes, files.silences)
+    for i, r in enumerate(ranges):
+        part = _scaled(ctx.report, i / len(ranges), (i + 1) / len(ranges))
+        try:
+            rows = thumbnails.make_candidates(
+                ctx.job_id, r, src.path, src.probe, cuts,
+                count=s.thumbnail_candidates, samples=s.thumbnail_samples, on_progress=part,
+            )  # fmt: skip
+        except FfmpegError as e:
+            raise StepError(f"썸네일 후보를 만들지 못했습니다: {e}") from e
+        with session_scope() as session:
+            thumbnails.store(session, r.clip_id, rows)
+        _render_overlay(r.clip_id)

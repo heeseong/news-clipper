@@ -190,19 +190,35 @@ news-clipper/
 - 관찰(11-16, 11-19 두 번, 단신만 해당, 규칙은 안 바꿈): 녹화본 끝에 관계없는 오디오가 있으면 마지막 쪽 단신이 그쪽으로 몰려 정렬된다(창 끝 쏠림). 녹화본 끝 가까이에 리포트가 오면 문제가 될 수 있다. 소수점 `5.8`을 앵커는 [오쩜팔]로 읽는다. 리포트에 영향이 생기면 다룬다
 - 테스트의 합성 log-prob에서 ctc-segmentation은 문장 첫 글자를 앞 무음 쪽으로 당겨 놓는다(실제 데이터에서도 일어나 PoC가 `refine_onset`으로 보정한 현상). 테스트는 보정 후 시각으로 비교한다
 
-## M4. 메타데이터·썸네일 (파이프라인 7)
-| # | Task |
-|---|---|
-| 4.1 | 원고 기반 기본값: 제목(정리된 원고 제목), 설명(앵커 리드 + 템플릿 꼬리말), 태그(기본 태그 + 기자명), 썸네일 문구(원고 메모) |
-| 4.2 | `LLMProvider` 인터페이스 + Claude 구현 + Fake: 대안 제목 2개, 본문 요약, 키워드·해시태그 (structured output) |
-| 4.3 | 사실성 검사: LLM 결과의 고유명사·숫자가 원고에 있는지 확인 |
-| 4.4 | 썸네일 후보 추출(원본에서, 프록시 아님) + 점수(선명도/노출/얼굴, 앵커 샷 감점) → 상위 6개 |
-| 4.5 | 썸네일 오버레이 렌더러(Pillow, 템플릿 JSON) → 1280×720 JPG ≤ 2MB |
-| 4.6 | 메타 재생성 API |
+## M4. 메타데이터·썸네일 (파이프라인 7) — 구현 (2026-11-20). 실제 Claude 호출·실제 녹화본 썸네일 확인이 남음
+> **상태 (2026-11-20)**: 4.1~4.6 구현, Fake LLM과 합성 영상으로 파이프라인 끝(REVIEW_READY)까지 테스트. Anthropic API 키와 실제 녹화본이 없어 실제 Claude 응답·실제 화면의 썸네일 점수는 확인하지 못했다.
+
+| # | Task | 상태 |
+|---|---|---|
+| 4.1 | 원고 기반 기본값: 제목(정리된 원고 제목), 설명(앵커 리드 + 템플릿 꼬리말), 태그(기본 태그 + 기자명), 썸네일 문구(원고 메모) | 완료 (`metadata/defaults.py`, `script.py`). 태그에 지역명(전남 22개 시군·광주·전남). 메모는 항상 비어 있어 썸네일 문구는 제목에서(15자 이내 단어 단위) |
+| 4.2 | `LLMProvider` 인터페이스 + Claude 구현 + Fake: 대안 제목 2개, 본문 요약, 키워드·해시태그 (structured output) | 완료 (`metadata/llm.py`, `claude.py`, `factory.py`). 썸네일 문구도 LLM이 만든다. 실제 API 호출은 키를 받으면 확인 |
+| 4.3 | 사실성 검사: LLM 결과의 고유명사·숫자가 원고에 있는지 확인 | 완료 (`metadata/factcheck.py`, 형태 기반 휴리스틱) |
+| 4.4 | 썸네일 후보 추출(원본에서, 프록시 아님) + 점수(선명도/노출/얼굴, 앵커 샷 감점) → 상위 6개 | 완료 (`thumbnails/candidates.py`, 얼굴은 YuNet) |
+| 4.5 | 썸네일 오버레이 렌더러(Pillow, 템플릿 JSON) → 1280×720 JPG ≤ 2MB | 완료 (`thumbnails/overlay.py`, 나눔고딕 ExtraBold 동봉) |
+| 4.6 | 메타 재생성 API | 완료 (`POST /api/clips/{id}/metadata/regenerate`, `ai` 큐) |
 
 **DoD**: 각 클립(자사 리포트·스트레이트, 구간이 있는 것)에 원고 기반 메타데이터, LLM 대안, 썸네일 후보 6개가 생기고 Job이 REVIEW_READY가 된다. Claude API 키가 없어도 원고 기반 기본값만으로 진행된다.
 
-### M4 시작 가이드 (새 세션용, 2026-11-20 작성)
+### M4에서 정한 것
+- **기본값은 원고, LLM 결과는 후보** (spec 16-5 제목 정책이 정해지기 전까지): 제목 기본값은 정리된 원고 제목, LLM 대안 제목 2개는 `title_candidates`에. 설명은 리드(단신은 원고 전체) + 꼬리말이고 LLM 요약은 `summary`에 따로 둔다(설명에 넣지 않음). 예외: 썸네일 문구는 원고 메모가 없으므로 LLM 문구가 사실성 검사를 통과하면 기본값, 아니면 제목에서 자른 문구
+- **사실성 검사**: 숫자, 영문 단어, 지명·기관 접미사(시·군·도·청·대학교·병원 …)로 끝나는 말, 직함 앞 이름(○○○ 지사·씨 …)이 원고(띄어쓰기 무시)에 없으면 경고. 제목·요약·썸네일 문구는 경고만 하고, 키워드·해시태그는 뺀다. 형태소 분석기 없는 휴리스틱이라 오탐이 있을 수 있다(경고일 뿐)
+- **LLM 실패는 단계를 실패시키지 않는다**: API 오류(SDK가 429·5xx·타임아웃을 지수 백오프로 재시도한 뒤), 거절, 형식 오류 2회 → 경고(`LLM 보완 실패 …`)와 원고 기반 기본값. `LLM_PROVIDER=claude`인데 키가 없으면 LLM 없이 진행. 토큰 사용량은 `ClipMetadata.llm_input_tokens`·`llm_output_tokens`
+- **Claude 호출**: 모델 `claude-opus-5-5`(설정 `LLM_MODEL`), effort `medium`, JSON 스키마 structured output + Pydantic 검사(제목 100자, 썸네일 문구 공백 빼고 15자, 키워드 10개, 해시태그 3개, 요약 400자), 거절 시 서버 측 대체 모델(`fallbacks: "default"`, `LLM_REFUSAL_FALLBACK`). 원고 텍스트만 보낸다. 클립 4개씩 병렬
+- **썸네일 후보**: 클립 구간 안의 컷 + 0.5초(짧은 샷은 가운데)와 균등 12개, 컷 ±0.15초는 제외. 점수 = 0.45 선명도(Laplacian 분산, 로그, 클립 안 최댓값 기준) + 0.25 노출 + 0.3 얼굴(YuNet, 화면의 4% 이상이면 만점) − 0.6 앵커 구간 − 1.0 어둡거나 밋밋함. 같은 샷에서는 한 장씩 먼저 고른 뒤 나머지를 점수순으로 → 상위 6개, 1위를 선택. 앵커 구간: 리포트는 리드 마지막 문장 끝(±2초 안의 컷이 있으면 그 컷)까지, 단신은 첫 샷. 가중치는 실제 녹화본으로 확인하지 않은 값
+- **프레임**: 원본에서 입력 쪽 `-ss`(파일 시작 기준), 인터레이스면 yadif, 화소 비율 보정 후 1280×720에 맞추고 남는 부분은 검은 띠
+- **오버레이**: 프로그램 프로필 `thumbnail_template`(JSON, 키는 `overlay.DEFAULT_TEMPLATE`)로 위치·정렬·글자 크기·색·외곽선·그림자·로고를 정한다. 로고·폰트 파일은 `STORAGE_ROOT/branding/`. 기본 폰트는 저장소에 넣은 나눔고딕 ExtraBold(OFL, `thumbnails/fonts/`). 문구가 두 줄에 안 들어가면 글자를 64px까지 줄인다. 2MB를 넘으면 JPEG 품질을 낮춘다
+- **metadata·thumbnails 단계는 병렬**이라 오버레이(`thumbnail.jpg`)는 둘 중 나중에 끝난 쪽이 만든다(각자 커밋한 뒤 `render_selected`)
+- 구간이 없는 클립(정렬 판정 실패·미검출)은 둘 다 건너뛴다. M5에서 구간을 지정하면 `regenerate_clip_metadata` 태스크와 썸네일 후보 생성(`thumbnails.service.make_candidates`)을 다시 부른다(썸네일 재생성 API는 M5에서)
+- `align`을 다시 돌리면 클립과 함께 메타·썸네일 행(ON DELETE CASCADE)과 `clips/` 폴더를 지운다(SQLite는 클립 ID를 재사용함). 재생성 API는 공개 설정(privacy, publish_at)만 두고 덮어쓴다 — M5에서 검수자 수정 보존 규칙을 정한다
+- 프로그램 API(`POST/PUT /api/programs`)에 `description_footer`(자리표시 `{station} {program} {date} {reporter} {reporter_credit} {title}`), `default_tags`, `thumbnail_template` 추가. 설명 꼬리말·기본 태그·썸네일 디자인은 임시 기본값이고 사용자에게 받아 프로필에 넣는다
+- 의존성: `anthropic`, `pillow`, `opencv-python-headless`(5.x는 Haar cascade가 없어 YuNet ONNX 모델 232KB를 `thumbnails/models/`에 넣음, MIT)
+
+### M4 시작 가이드 (새 세션용, 2026-11-20 작성 — M4 구현 전 기록)
 
 **먼저 읽을 것**: spec 5.7(제목·설명·썸네일), 5.8의 "메타데이터 편집·썸네일"(M5에서 쓸 형태), 7(ClipMetadata, Thumbnail), 9(비용: LLM 토큰 기록), 10(LLM 응답 검증 실패 처리). 이 파일의 "M2에서 정한 것", "M3에서 정한 것"
 
@@ -321,7 +337,7 @@ news-clipper/
 | M1 | 완료 | |
 | M2 | 3일 | 다음 작업. 파서 핵심 로직은 구현됨. 실제 API 검증(2.10)은 액세스 키 확보 후 |
 | M3 | 5일 | PoC 코드 이전 + 회귀 확인 |
-| M4 | 3일 | |
+| M4 | 3일 | 구현 완료, 실제 Claude·녹화본 확인 남음 |
 | M5 | 7일 | |
 | M6 | 2일 | |
 | M7 | 4일 | |
@@ -334,7 +350,7 @@ news-clipper/
 - [x] MARS-L API 명세 (지역MBC-NRCS-B106 V0.2)
 - [x] MARS-L 액세스 키, 실제 응답 샘플 (M2.10, 2026-11-20)
 - [ ] 사내 앱 서버에서 `api.marsl.co.kr` 접근 확인 (클라우드 세션에서는 됨)
-- [ ] Anthropic API 키 (M4, 없으면 원고 기반 기본값으로 진행)
+- [ ] Anthropic API 키 (M4 실제 호출 확인용, 없으면 원고 기반 기본값으로 진행). 받을 때는 `request_credential`(호스트 `api.anthropic.com`, 헤더 `x-api-key`)
 - [ ] YouTube 테스트 채널 + Google Cloud OAuth 클라이언트 (M7)
 - [ ] YouTube API 할당량 증설 신청 — 승인에 수 주가 걸릴 수 있어 **조기 신청**
 - [ ] 정렬 워커용 서버 사양 확인 (CPU 8코어, RAM 16GB 이상 권장)

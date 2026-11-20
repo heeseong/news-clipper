@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api } from "./client";
-import type { Clip, JobDetail, Rundown, RundownPreview } from "./types";
+import type { Clip, ClipDetail, JobDetail, Rundown, RundownPreview } from "./types";
 
 /** Which cue sheet a recording of this program and date would be matched to (upload form). */
 export function useRundownPreview(programId: number | null, date: string, cueSheetId: number | null, enabled = true) {
@@ -46,5 +46,28 @@ export function useJobClips(jobId: number, version: string | null) {
     queryFn: () => api.get<Clip[]>(`/api/jobs/${jobId}/clips`),
     enabled: version !== null,
     staleTime: Infinity,
+  });
+}
+
+/** One clip with its metadata and thumbnail candidates. */
+export function useClip(clipId: number | null, version: string | null, poll = false) {
+  return useQuery({
+    queryKey: ["clips", clipId, version],
+    queryFn: () => api.get<ClipDetail>(`/api/clips/${clipId}`),
+    enabled: clipId != null && version !== null,
+    staleTime: Infinity,
+    refetchInterval: poll ? 2000 : false,
+  });
+}
+
+/** LLM candidates again (plan 4.6). The job event stream announces the result. */
+export function useRegenerateMetadata(clipId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<{ queued: boolean }>(`/api/clips/${clipId}/metadata/regenerate`, {}),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["clips", clipId] });
+      void qc.invalidateQueries({ queryKey: ["jobs"] });
+    },
   });
 }

@@ -131,7 +131,8 @@ def test_upload_to_analysis(client, synthetic_video):
     assert steps["proxy"] == steps["analyze"] == "SUCCEEDED"
     assert steps["newsroom"] == "SUCCEEDED"  # fake newsroom (synthetic fixtures)
     assert steps["align"] == "SUCCEEDED"  # silent fake model: every report needs a manual range
-    assert {steps[s] for s in ("metadata", "thumbnails")} == {"SKIPPED"}
+    # No clip has a range, so there is nothing to describe or picture yet (M5 sets ranges).
+    assert {steps[s] for s in ("metadata", "thumbnails")} == {"SUCCEEDED"}
     assert job["status"] == "REVIEW_READY"
     assert job["artifacts"] == {
         "proxy": True,

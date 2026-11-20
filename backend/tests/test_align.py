@@ -284,7 +284,7 @@ def aligned_job(app_env, monkeypatch):
            "broadcastStartTime": "19:30:00", "cueSheetVersion": 2}
     provider = FakeNewsroomProvider([cue], {7001: raw})
     factory.set_provider(provider)
-    for step in ("proxy", "analyze"):
+    for step in ("proxy", "analyze", "thumbnails"):  # no source video here
         monkeypatch.setitem(step_registry._HANDLERS, step, lambda ctx: None)
     with session_scope() as s:
         prog = ProgramProfile(name="뉴스데스크")
