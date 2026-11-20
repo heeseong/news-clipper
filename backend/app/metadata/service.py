@@ -65,7 +65,7 @@ def generate(
         tags=base.tags,
         hashtags=[],
         thumbnail_text=base.thumbnail_text,
-        thumbnail_text_candidates=[_candidate(base.thumbnail_text, "title")],
+        thumbnail_text_candidates=[_candidate(base.thumbnail_text, "title")] if base.thumbnail_text else [],
         warnings=[],
     )
     if len(base.title) > 100:
@@ -111,14 +111,24 @@ def generate(
     out.tags = defaults.tags(script, default_tags, keywords)
     out.hashtags = hashtags
 
-    thumb_warnings = factcheck.warnings_for("썸네일 문구", s.thumbnail_text, ref)
-    out.thumbnail_text_candidates.insert(0, _candidate(s.thumbnail_text, "llm", thumb_warnings))
-    # No memo in the script (spec 5.7): the generated line is the default unless it fails the check.
-    if not thumb_warnings and thumbnail_length(s.thumbnail_text) <= THUMBNAIL_TEXT_MAX:
-        out.thumbnail_text = s.thumbnail_text
-    else:
-        out.thumbnail_text_candidates.reverse()
     out.warnings += [w for c in out.title_candidates for w in c["warnings"]]
+    if script.kind == "brief":  # no text on a brief's thumbnail
+        return out
+    thumb_warnings = factcheck.warnings_for("썸네일 문구", s.thumbnail_text, ref)
+    llm_thumb = _candidate(s.thumbnail_text, "llm", thumb_warnings)
+    # The script memo is always empty (spec 5.7). The channel's report headline is the title split
+    # at its ellipsis. Only a title without an ellipsis is replaced by the LLM's two lines, when
+    # they pass the check.
+    use_llm = (
+        defaults.split_at_separator(script.title) is None
+        and not thumb_warnings
+        and thumbnail_length(s.thumbnail_text) <= THUMBNAIL_TEXT_MAX
+    )
+    if use_llm:
+        out.thumbnail_text = s.thumbnail_text
+        out.thumbnail_text_candidates.insert(0, llm_thumb)
+    else:
+        out.thumbnail_text_candidates.append(llm_thumb)
     out.warnings += thumb_warnings
     return out
 

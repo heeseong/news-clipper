@@ -595,3 +595,8 @@ div.rundown-preview.warn-box {
   margin: 0;
   font-family: inherit;
 }
+.candidates .multiline {
+  white-space: pre-line;
+  vertical-align: top;
+  display: inline-block;
+}

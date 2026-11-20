@@ -27,6 +27,7 @@ REPORT = ClipScript(
     station="목포MBC",
 )
 REPORT.all_text = "\n".join([REPORT.title, *REPORT.lead, *REPORT.body, "엠비씨 뉴스 홍길동입니다."])
+REPORT_SPLIT = ClipScript(**{**REPORT.__dict__, "title": "압해도 새 다리…오늘 개통"})
 BRIEF = ClipScript(
     kind="brief",
     title="겨울 축제 준비",
@@ -84,12 +85,15 @@ def test_brief_description_is_the_whole_text_and_footer_template_is_used():
     assert d.tags == ["진도"]
 
 
-def test_thumbnail_text_fits_15_characters():
+def test_thumbnail_text_follows_the_channel():
+    # Reports: the title in two lines, split at its ellipsis (examples from the channel).
+    assert defaults.thumbnail_text('"공정성 외친 77일"...광장 떠나 장기전으로') == '"공정성 외친 77일"...\n광장 떠나 장기전으로'
+    assert defaults.thumbnail_text("일제강점기부터 지금까지..'100년의 목포극장'") == "일제강점기부터 지금까지\n'100년의 목포극장'"
     assert defaults.thumbnail_text("짧은 제목") == "짧은 제목"
-    long = "전남 서남권 섬 지역 응급 의료 공백 여전히 심각"
-    text = defaults.thumbnail_text(long)
-    assert len(text.replace(" ", "")) <= 15 and long.startswith(text)
-    assert defaults.thumbnail_text("의료 공백, 섬 주민들 여전히 불편 호소하는 현실") == "의료 공백"
+    assert defaults.thumbnail_text("전남 서남권 섬 지역 응급 의료 공백 여전히 심각") == "전남 서남권 섬 지역 응급\n의료 공백 여전히 심각"
+    assert defaults.thumbnail_text("여수·순천 통합 논의") == "여수·순천 통합 논의"
+    # Briefs: no text (the frame shows the on-air title caption).
+    assert defaults.thumbnail_text("출장비 부풀리기 의혹 1년 만에…시의원 해외연수 4억 원", "brief") == ""
 
 
 def test_tags_stay_under_youtube_limit():
@@ -132,7 +136,13 @@ def test_llm_suggestions_are_added_as_candidates():
     assert g.summary.startswith("길이 1킬로미터")
     assert g.tags == ["뉴스", "홍길동", "목포", "신안", "압해도", "다리", "신안군"]
     assert g.hashtags == ["#압해도", "#목포시"]
-    assert g.thumbnail_text == "압해도 다리 개통"  # no memo in the script: the generated line is used
+    # No memo and no ellipsis in the title: the checked LLM line is used.
+    assert g.thumbnail_text == "압해도 다리 개통"
+    split = generate(REPORT_SPLIT, StaticProvider(suggestions()))
+    assert split.thumbnail_text == "압해도 새 다리\n오늘 개통"  # the title split at its ellipsis wins
+    assert [c["source"] for c in split.thumbnail_text_candidates] == ["title", "llm"]
+    brief = generate(BRIEF, StaticProvider(suggestions(thumbnail_text="축제 준비")))
+    assert brief.thumbnail_text == "" and brief.thumbnail_text_candidates == []  # nothing drawn on a brief
     assert g.warnings == []
 
 
@@ -171,8 +181,13 @@ def test_brief_gets_no_summary():
 def test_suggestions_are_validated():
     with pytest.raises(ValueError, match="exactly 2"):
         suggestions(titles=["하나"])
-    with pytest.raises(ValueError, match="15"):
-        suggestions(thumbnail_text="이 문구는 띄어쓰기를 빼도 열다섯 자가 넘습니다")
+    with pytest.raises(ValueError, match="16"):
+        suggestions(thumbnail_text="이 문구는 띄어쓰기를 빼도 열여섯 자가 넘는 한 줄입니다")
+    with pytest.raises(ValueError, match="2 lines"):
+        suggestions(thumbnail_text="하나\n둘\n셋")
+    assert suggestions(thumbnail_text=" '고병원성 AI' 잇단 확진 \n\n 한 달 빨라진 발생 ").thumbnail_text == (
+        "'고병원성 AI' 잇단 확진\n한 달 빨라진 발생"
+    )
     assert suggestions(hashtags=["목포 시", "#목포시"]).hashtags == ["#목포시"]
 
 

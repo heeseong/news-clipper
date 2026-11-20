@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field, field_validator
 from .script import ClipScript
 
 TITLE_MAX = 100  # YouTube limit
-THUMBNAIL_TEXT_MAX = 15  # characters without spaces
+THUMBNAIL_TEXT_MAX = 16  # characters per line, without spaces (two lines at most)
 SUMMARY_MAX = 400
 
 
@@ -34,7 +34,8 @@ class LLMError(Exception):
 
 
 def thumbnail_length(text: str) -> int:
-    return len(re.sub(r"\s+", "", text))
+    """Characters of the longest line, spaces not counted."""
+    return max((len(re.sub(r"\s+", "", line)) for line in text.splitlines()), default=0)
 
 
 class Suggestions(BaseModel):
@@ -85,8 +86,11 @@ class Suggestions(BaseModel):
         v = v.strip()
         if not v:
             raise ValueError("thumbnail_text is empty")
+        v = "\n".join(line.strip() for line in v.splitlines() if line.strip())
+        if len(v.splitlines()) > 2:
+            raise ValueError("thumbnail_text has more than 2 lines")
         if thumbnail_length(v) > THUMBNAIL_TEXT_MAX:
-            raise ValueError(f"thumbnail_text longer than {THUMBNAIL_TEXT_MAX} characters (spaces not counted)")
+            raise ValueError(f"a thumbnail_text line is longer than {THUMBNAIL_TEXT_MAX} characters (spaces not counted)")
         return v
 
 

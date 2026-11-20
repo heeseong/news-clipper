@@ -4,11 +4,12 @@ metadata + thumbnails steps on a synthetic broadcast."""
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import numpy as np
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 from app.core.db import session_scope
 from app.media.ffmpeg import probe
@@ -76,39 +77,94 @@ def frame(tmp_path: Path) -> Path:
     return path
 
 
+REPORT_T = overlay.template_for("report", None)
+BRIEF_T = overlay.template_for("brief", None)
+
+
+@pytest.fixture
+def grey(tmp_path: Path) -> Path:
+    path = tmp_path / "grey.jpg"
+    Image.new("RGB", (1280, 720), (128, 128, 128)).save(path)
+    return path
+
+
 def test_overlay_is_1280x720_jpeg_under_2mb(frame: Path, tmp_path: Path):
-    out = overlay.render_to(frame, "압해도 새 다리 개통", tmp_path / "thumb.jpg")
-    assert out.stat().st_size <= overlay.MAX_BYTES
-    with Image.open(out) as img:
-        assert img.size == (1280, 720) and img.format == "JPEG"
+    for tpl in (REPORT_T, BRIEF_T):
+        out = overlay.render_to(frame, "압해도 새 다리\n오늘 개통", tmp_path / "thumb.jpg", tpl)
+        assert out.stat().st_size <= overlay.MAX_BYTES
+        with Image.open(out) as img:
+            assert img.size == (1280, 720) and img.format == "JPEG"
 
 
-def test_overlay_wraps_long_text_and_draws_at_the_bottom(tmp_path: Path):
-    grey = tmp_path / "grey.jpg"
-    Image.new("RGB", (1280, 720), (128, 128, 128)).save(grey)
-    font, lines = overlay.layout("섬마을 응급 의료 공백 여전히 심각한 상황", overlay.template_with_defaults(None))
-    assert 1 < len(lines) <= 2
-    img = np.asarray(overlay.render(grey, "의료 공백"))
-    assert np.abs(img[:200].astype(int) - 128).max() < 10  # top untouched
-    assert img[600:].min() < 30 and img[600:].max() > 230  # white text with a black stroke
+def test_report_headline_two_lines_yellow_then_white(grey: Path):
+    img = np.asarray(overlay.render(grey, "'고병원성 AI' 잇단 확진\n한 달 빨라진 발생", REPORT_T)).astype(int)
+    lower = img[430:700, 40:900]
+    yellow = (lower[..., 0] > 200) & (lower[..., 1] > 170) & (lower[..., 2] < 90)
+    white = (lower > 220).all(axis=-1)
+    ys, ws = np.where(yellow)[0], np.where(white)[0]
+    assert len(ys) > 500 and len(ws) > 500
+    assert ys.mean() < ws.mean()  # the yellow line is above the white one
+    corner = img[10:60, 1180:1270]
+    assert corner[..., 2].mean() > corner[..., 0].mean() + 40  # blue band behind the logo
+    assert np.abs(img[150:250, 300:500] - 128).max() < 10  # the middle of the picture is untouched
 
 
-def test_overlay_template_top_left_and_logo(tmp_path: Path, monkeypatch):
+def test_brief_thumbnail_is_the_frame_as_it_is(frame: Path):
+    out = np.asarray(overlay.render(frame, "아무 문구", BRIEF_T)).astype(int)
+    assert np.abs(out - np.asarray(Image.open(frame).convert("RGB")).astype(int)).max() == 0
+
+
+def test_profile_template_keys(tmp_path: Path, grey: Path, monkeypatch):
     monkeypatch.setattr(overlay, "branding_dir", lambda: tmp_path)
     Image.new("RGBA", (200, 100), (255, 0, 0, 255)).save(tmp_path / "logo.png")
-    grey = tmp_path / "grey.jpg"
-    Image.new("RGB", (1280, 720), (128, 128, 128)).save(grey)
-    tpl = {"position": "top", "align": "left", "shade": 0, "logo": "logo.png", "logo_position": "bottom-right"}
-    img = np.asarray(overlay.render(grey, "속보", tpl))
-    assert img[660, 1180, 0] > 200 and img[660, 1180, 1] < 60  # red logo bottom right
-    assert img[60:180, 40:300].min() < 30  # text top left
-    assert np.abs(img[400:500, 600:700].astype(int) - 128).max() < 10
+    profile = {"logo": "logo.png", "report": {"line_colors": ["#FFFFFF"]}}
+    rep = overlay.template_for("report", profile)
+    assert rep["logo"] == "logo.png" and rep["line_colors"] == ["#FFFFFF"] and rep["style"] == "headline"
+    img = np.asarray(overlay.render(grey, "", rep)).astype(int)
+    assert img[60, 1180, 0] > 200 and img[60, 1180, 1] < 60  # placeholder design with the logo file
+    assert overlay.unknown_keys(profile) == []
+    assert overlay.unknown_keys({"colour": 1, "brief": {"size": 2}, "report": 3}) == ["brief.size", "colour", "report"]
 
 
-def test_empty_text_leaves_the_frame(tmp_path: Path):
-    grey = tmp_path / "grey.jpg"
-    Image.new("RGB", (1280, 720), (128, 128, 128)).save(grey)
-    assert np.abs(np.asarray(overlay.render(grey, "")).astype(int) - 128).max() < 10
+def test_report_template_image_replaces_the_placeholder(grey: Path, tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(overlay, "branding_dir", lambda: tmp_path)
+    tpl_img = Image.new("RGBA", (1280, 720), (0, 0, 0, 0))
+    tpl_img.paste(Image.new("RGBA", (200, 100), (255, 0, 0, 255)), (1050, 30))  # a red "logo"
+    tpl_img.save(tmp_path / "tpl.png")
+    profile = {"report": {"overlay_image": "tpl.png", "text_box": [100, 300, 900, 200]}}
+    t = overlay.template_for("report", profile)
+    assert t["shade"] == 0  # the template carries its own design
+    img = np.asarray(overlay.render(grey, "첫 줄\n둘째 줄", t)).astype(int)
+    assert img[80, 1150, 0] > 200 and img[80, 1150, 1] < 60  # template on top of the frame
+    assert img[10, 1270, 2] < 160  # no placeholder blue corner band
+    lit = (img[:, 100:1000] > 200).all(axis=-1) | ((img[:, 100:1000, 0] > 200) & (img[:, 100:1000, 2] < 90))
+    text_rows = np.where(lit.any(axis=1))[0]
+    assert text_rows.min() >= 300 and text_rows.max() <= 520  # the text stays in its box
+    assert overlay.template_for("report", {"report": {**profile["report"], "shade": 0.3}})["shade"] == 0.3
+    assert overlay.template_for("brief", profile)["style"] == "frame"
+
+
+def test_brief_candidates_favour_the_on_air_caption(tmp_path: Path):
+    """Two equally good pictures; the one with the title caption at the bottom wins for a brief."""
+    from app.thumbnails.overlay import FONT
+
+    rng = np.random.default_rng(1)
+    base = Image.fromarray(rng.integers(60, 200, (72, 128, 3), dtype=np.uint8)).resize((1280, 720), Image.BICUBIC)
+    plain, captioned = tmp_path / "plain.jpg", tmp_path / "cap.jpg"
+    base.save(plain)
+    img = base.copy()
+    d = ImageDraw.Draw(img)
+    d.rectangle([60, 560, 1220, 640], fill="white")
+    d.text((90, 572), "출장비 부풀리기 의혹 1년 만에…시의원 해외연수", font=ImageFont.truetype(str(FONT), 50), fill="#10204A")
+    img.save(captioned)
+    m_plain, m_cap = measure(plain, None), measure(captioned, None)
+    assert m_cap["caption"] > 0.3 and m_plain["caption"] < 0.1
+    brief = [Candidate(1.0, 0, False), Candidate(2.0, 1, False)]
+    score(brief, [m_plain, m_cap], "brief")
+    assert brief[1].score > brief[0].score + 0.25 and brief[1].details["caption"] > 0.3
+    report = [Candidate(1.0, 0, False), Candidate(2.0, 1, False)]
+    score(report, [m_plain, m_cap], "report")
+    assert abs(report[1].score - report[0].score) < brief[1].score - brief[0].score
 
 
 # --- frames from the original ---
@@ -232,12 +288,92 @@ def test_rerunning_align_replaces_metadata_and_files(job_with_source):
 def test_program_metadata_settings_api(client):
     r = client.post("/api/programs", json={"name": "뉴스투데이", "default_tags": [" 뉴스 ", "뉴스", ""],
                                            "description_footer": "{program} {date}",
-                                           "thumbnail_template": {"position": "top"}})
+                                           "thumbnail_template": {"report": {"font_size": 80}}})
     assert r.status_code == 201, r.text
     body = r.json()
-    assert body["default_tags"] == ["뉴스"] and body["thumbnail_template"] == {"position": "top"}
+    assert body["default_tags"] == ["뉴스"] and body["thumbnail_template"] == {"report": {"font_size": 80}}
     r = client.put(f"/api/programs/{body['id']}", json={"name": "뉴스투데이", "thumbnail_template": {"colour": 1}})
     assert r.status_code == 422
     r = client.put(f"/api/programs/{body['id']}", json={"name": "뉴스투데이", "description_footer": ""})
     assert r.json()["description_footer"] is None and r.json()["default_tags"] == ["뉴스"]
     assert json.dumps(r.json(), ensure_ascii=False)
+
+
+def test_report_template_upload_api(client):
+    import io
+
+    pid = client.post("/api/programs", json={"name": "뉴스데스크"}).json()["id"]
+
+    def png(size, alpha=0):
+        buf = io.BytesIO()
+        Image.new("RGBA", size, (0, 0, 255, alpha)).save(buf, "PNG")
+        return buf.getvalue()
+
+    url = f"/api/programs/{pid}/thumbnail-overlay"
+    assert client.put(url, content=png((1920, 1080), 255)).status_code == 422  # no transparency
+    assert client.put(url, content=png((1000, 1000))).status_code == 422  # not 16:9
+    assert client.put(url, content=b"not an image").status_code == 422
+    r = client.put(url, content=png((1920, 1080)), headers={"content-type": "image/png"})
+    assert r.status_code == 200, r.text
+    rel = r.json()["thumbnail_template"]["report"]["overlay_image"]
+    with Image.open(overlay.branding_dir() / rel) as saved:
+        assert saved.size == (1280, 720)
+    preview = client.get(f"/api/programs/{pid}/thumbnail-preview")
+    assert preview.status_code == 200 and preview.headers["content-type"] == "image/jpeg"
+    r = client.delete(url)
+    assert "overlay_image" not in r.json()["thumbnail_template"]["report"]
+    assert not (overlay.branding_dir() / rel).exists()
+
+
+def _texture(seed: int, level: int) -> Image.Image:
+    rng = np.random.default_rng(seed)
+    small = rng.integers(level - 50, level + 50, (36, 64, 3)).clip(0, 255).astype(np.uint8)
+    return Image.fromarray(small).resize((640, 360), Image.BICUBIC)
+
+
+def _caption(img: Image.Image, text: str) -> Image.Image:
+    from app.thumbnails.overlay import FONT
+
+    img = img.copy()
+    d = ImageDraw.Draw(img)
+    d.rectangle([30, 280, 610, 320], fill=(20, 20, 30))
+    d.text((45, 286), text, font=ImageFont.truetype(str(FONT), 25), fill="white")
+    return img
+
+
+def test_brief_thumbnail_is_the_first_caption_after_the_anchor_shot(tmp_path: Path):
+    """Anchor shot with a quote caption (0–3 s), a dissolve to the footage (3–3.6 s), the title
+    caption comes up 1 s into the footage. No scene cut is given (the dissolve is not detected)."""
+    from tests.fixtures.synthetic import ffmpeg_available
+
+    if not ffmpeg_available():
+        pytest.skip("ffmpeg not installed")
+    from app.thumbnails.candidates import choose, scan_brief
+
+    fps = 10
+    anchor = _caption(_texture(1, 110), '"인용 자막"')
+    footage = _texture(2, 150)
+    frames_dir = tmp_path / "frames"
+    frames_dir.mkdir()
+    for i in range(int(9 * fps)):
+        t = i / fps
+        if t < 3.0:
+            img = anchor
+        elif t < 3.6:
+            img = Image.blend(anchor, footage, (t - 3.0) / 0.6)
+        else:
+            img = _caption(footage, "제목 자막이 올라간 자료화면") if t >= 4.6 else footage
+        img.save(frames_dir / f"{i:04d}.png")
+    video = tmp_path / "brief.mp4"
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-framerate", str(fps), "-i", str(frames_dir / "%04d.png"),
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", "-g", "10", str(video)], check=True)  # fmt: skip
+    p = probe(video)
+    scan = scan_brief(video, p, 0.0, 9.0, tmp_path / "scan")
+    assert 3.0 < scan.footage_start <= 4.0
+    first = scan.first_caption
+    assert first is not None and 4.6 <= first.time <= 5.6 and first.details["caption"] >= 0.5
+    picked = choose(video, p, "brief", 0.0, 9.0, [], None, tmp_path / "work", 6, samples=6)
+    assert picked[0].time == first.time and picked[0].details["rule"] == 1.0
+    assert all(c.time >= 3.0 or c.details["anchor"] == 1.0 for c in picked[1:])  # the anchor shot is known
+    # A report keeps the score order (no caption rule).
+    assert "rule" not in choose(video, p, "report", 0.0, 9.0, [], None, tmp_path / "work_r", 6, samples=4)[0].details
