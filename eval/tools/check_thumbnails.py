@@ -30,9 +30,8 @@ from app.newsroom.models import ItemType  # noqa: E402
 from app.newsroom.rundown import build_item  # noqa: E402
 from app.thumbnails.candidates import (  # noqa: E402
     anchor_end_for,
-    candidate_times,
+    choose,
     extract_frame,
-    find_candidates,
     measure,
 )
 from app.thumbnails.overlay import FONT  # noqa: E402
@@ -104,11 +103,11 @@ def cmd_run(d: Path) -> None:
     in_all = n_all = 0
     for b in briefs(d):
         anchor_end = anchor_end_for("brief", b["start"], b["end"], cuts, None)
-        times = candidate_times(b["start"], b["end"], cuts, anchor_end)
-        picked = find_candidates(src, p, times, out / f"work_{b['order']}", 6, kind="brief")
+        picked = choose(src, p, "brief", b["start"], b["end"], cuts, None, out / f"work_{b['order']}", 6)
         sheet([(f"{i + 1}. {c.time:.1f}s cap {c.details['caption']:.2f}", c.path) for i, c in enumerate(picked)],
               out / f"picks_{b['order']:02d}.jpg", cols=3)
-        line = f"{b['order']:>3} anchor→{anchor_end - b['start']:5.1f}s  top: " + ", ".join(
+        rule = "first caption" if picked and picked[0].details.get("rule") else "score"
+        line = f"{b['order']:>3} first cut {anchor_end - b['start']:5.1f}s  [{rule}] top: " + ", ".join(
             f"{c.time - b['start']:.1f}s(cap {c.details['caption']:.2f}, {c.score:.2f})" for c in picked[:3])
         if labels and str(b["order"]) in labels["briefs"]:
             step = labels["step"]

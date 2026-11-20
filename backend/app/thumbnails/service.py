@@ -20,7 +20,7 @@ from app.newsroom.models import ItemType, ParsedScript
 from app.storage import JobFiles
 
 from . import overlay
-from .candidates import anchor_end_for, candidate_times, find_candidates
+from .candidates import choose
 
 log = logging.getLogger(__name__)
 
@@ -72,9 +72,7 @@ def make_candidates(
     out_dir = files.thumb_candidates_dir(r.clip_id)
     work = out_dir.parent / "thumb_work"
     shutil.rmtree(work, ignore_errors=True)
-    anchor_end = anchor_end_for(r.kind, r.start, r.end, cuts, r.lead_end)
-    times = candidate_times(r.start, r.end, cuts, anchor_end, samples)
-    picked = find_candidates(src, probe, times, work, count, kind=r.kind, on_progress=on_progress)
+    picked = choose(src, probe, r.kind, r.start, r.end, cuts, r.lead_end, work, count, samples, on_progress)
     shutil.rmtree(out_dir, ignore_errors=True)
     out_dir.mkdir(parents=True)
     rows = []

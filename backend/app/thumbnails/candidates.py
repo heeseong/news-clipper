@@ -227,3 +227,103 @@ def find_candidates(
     measures = [measure(c.path, faces) for c in times]
     score(times, measures, kind)
     return pick(times, n)
+
+
+CAPTION_ON = 0.5  # caption score that counts as "the caption is on screen"
+SCAN_STEP = 0.5
+SCAN_SECONDS = 30.0  # a brief's anchor shot plus the caption's appearance fit in this
+CAPTION_SETTLE = 0.5  # after the caption appears (it may still be fading or sliding in)
+# Mean absolute difference (0..255, blurred 64x36 grey, upper 65% of the picture) from the first
+# frame of the clip above which the anchor shot is over. 11-16 뉴스데스크: anchor shot 0–2,
+# footage 23–100 (the cut to footage is often a dissolve that scene detection misses).
+ANCHOR_DIFF = 15.0
+
+
+def _anchor_view(path: Path) -> np.ndarray:
+    import cv2
+
+    gray = cv2.cvtColor(cv2.imread(str(path)), cv2.COLOR_BGR2GRAY)
+    rows = np.where(gray.max(axis=1) > 16)[0]
+    cols = np.where(gray.max(axis=0) > 16)[0]
+    if len(rows) and len(cols):
+        gray = gray[rows[0] : rows[-1] + 1, cols[0] : cols[-1] + 1]
+    small = cv2.GaussianBlur(cv2.resize(gray, (64, 36)), (3, 3), 0).astype(np.float32)
+    return small[:23]  # leave out the caption band and the sign-language inset
+
+
+@dataclass
+class BriefScan:
+    footage_start: float | None  # when the picture stops being the anchor shot
+    first_caption: Candidate | None
+
+
+def scan_brief(src: Path, probe: ProbeResult, start: float, end: float, work_dir: Path) -> BriefScan:
+    """A brief's thumbnail (2026-11-20, user decision): the first frame after the anchor shot on
+    which the on-air title caption has come up.
+
+    Every SCAN_STEP seconds from the clip start: the anchor shot is over when the picture differs
+    from the first frame (ANCHOR_DIFF; captions on the anchor shot, e.g. a quote, are therefore
+    ignored); then the first frame with a caption, taken CAPTION_SETTLE seconds later if the
+    caption is still there."""
+    work_dir.mkdir(parents=True, exist_ok=True)
+    stop = min(end - NEAR_CUT, start + SCAN_SECONDS)
+    t = start + AFTER_CUT
+    if t >= stop:
+        return BriefScan(None, None)
+    ref = _anchor_view(extract_frame(src, probe, t, work_dir / "ref.jpg"))
+    footage_start = None
+    i = 0
+    t += SCAN_STEP
+    while t < stop:
+        path = extract_frame(src, probe, t, work_dir / f"scan{i:02d}.jpg")
+        if footage_start is None:
+            if float(np.abs(_anchor_view(path) - ref).mean()) < ANCHOR_DIFF:
+                t += SCAN_STEP
+                i += 1
+                continue
+            footage_start = round(t, 3)
+        m = measure(path, None)
+        if m["caption"] >= CAPTION_ON:
+            if t + CAPTION_SETTLE < end - NEAR_CUT:
+                settled = extract_frame(src, probe, t + CAPTION_SETTLE, work_dir / f"scan{i:02d}s.jpg")
+                ms = measure(settled, None)
+                if ms["caption"] >= CAPTION_ON:
+                    t, path, m = t + CAPTION_SETTLE, settled, ms
+            c = Candidate(round(t, 3), -1, False, path)
+            c.details = {"rule": 1.0, "caption": m["caption"]} | {
+                k: round(v, 2) for k, v in m.items() if k != "caption"
+            }
+            return BriefScan(footage_start, c)
+        t += SCAN_STEP
+        i += 1
+    return BriefScan(footage_start, None)
+
+
+def choose(
+    src: Path,
+    probe: ProbeResult,
+    kind: str,
+    start: float,
+    end: float,
+    cuts: list[float],
+    lead_end: float | None,
+    work_dir: Path,
+    n: int = 6,
+    samples: int = 12,
+    on_progress: Callable[[float], None] | None = None,
+) -> list[Candidate]:
+    """The candidates of one clip, best first (frames in `work_dir`).
+
+    A report: the best frames by score. A brief: the first footage frame with the on-air title
+    caption (scan_brief), then the best frames by score as alternatives."""
+    anchor_end = anchor_end_for(kind, start, end, cuts, lead_end)
+    scan = scan_brief(src, probe, start, end, work_dir / "scan") if kind == "brief" else None
+    if scan and scan.footage_start is not None:
+        anchor_end = scan.footage_start  # the change of picture, also when the cut is a dissolve
+    times = candidate_times(start, end, cuts, anchor_end, samples)
+    picked = find_candidates(src, probe, times, work_dir, n, kind=kind, on_progress=on_progress)
+    if not scan or scan.first_caption is None:
+        return picked
+    first = scan.first_caption
+    first.score = max((c.score for c in picked), default=0.0)  # shown first; the score is for display
+    return [first] + [c for c in picked if abs(c.time - first.time) >= MIN_GAP][: n - 1]

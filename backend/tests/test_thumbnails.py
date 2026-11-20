@@ -4,6 +4,7 @@ metadata + thumbnails steps on a synthetic broadcast."""
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import numpy as np
@@ -322,3 +323,57 @@ def test_report_template_upload_api(client):
     r = client.delete(url)
     assert "overlay_image" not in r.json()["thumbnail_template"]["report"]
     assert not (overlay.branding_dir() / rel).exists()
+
+
+def _texture(seed: int, level: int) -> Image.Image:
+    rng = np.random.default_rng(seed)
+    small = rng.integers(level - 50, level + 50, (36, 64, 3)).clip(0, 255).astype(np.uint8)
+    return Image.fromarray(small).resize((640, 360), Image.BICUBIC)
+
+
+def _caption(img: Image.Image, text: str) -> Image.Image:
+    from app.thumbnails.overlay import FONT
+
+    img = img.copy()
+    d = ImageDraw.Draw(img)
+    d.rectangle([30, 280, 610, 320], fill=(20, 20, 30))
+    d.text((45, 286), text, font=ImageFont.truetype(str(FONT), 25), fill="white")
+    return img
+
+
+def test_brief_thumbnail_is_the_first_caption_after_the_anchor_shot(tmp_path: Path):
+    """Anchor shot with a quote caption (0–3 s), a dissolve to the footage (3–3.6 s), the title
+    caption comes up 1 s into the footage. No scene cut is given (the dissolve is not detected)."""
+    from tests.fixtures.synthetic import ffmpeg_available
+
+    if not ffmpeg_available():
+        pytest.skip("ffmpeg not installed")
+    from app.thumbnails.candidates import choose, scan_brief
+
+    fps = 10
+    anchor = _caption(_texture(1, 110), '"인용 자막"')
+    footage = _texture(2, 150)
+    frames_dir = tmp_path / "frames"
+    frames_dir.mkdir()
+    for i in range(int(9 * fps)):
+        t = i / fps
+        if t < 3.0:
+            img = anchor
+        elif t < 3.6:
+            img = Image.blend(anchor, footage, (t - 3.0) / 0.6)
+        else:
+            img = _caption(footage, "제목 자막이 올라간 자료화면") if t >= 4.6 else footage
+        img.save(frames_dir / f"{i:04d}.png")
+    video = tmp_path / "brief.mp4"
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-framerate", str(fps), "-i", str(frames_dir / "%04d.png"),
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", "-g", "10", str(video)], check=True)  # fmt: skip
+    p = probe(video)
+    scan = scan_brief(video, p, 0.0, 9.0, tmp_path / "scan")
+    assert 3.0 < scan.footage_start <= 4.0
+    first = scan.first_caption
+    assert first is not None and 4.6 <= first.time <= 5.6 and first.details["caption"] >= 0.5
+    picked = choose(video, p, "brief", 0.0, 9.0, [], None, tmp_path / "work", 6, samples=6)
+    assert picked[0].time == first.time and picked[0].details["rule"] == 1.0
+    assert all(c.time >= 3.0 or c.details["anchor"] == 1.0 for c in picked[1:])  # the anchor shot is known
+    # A report keeps the score order (no caption rule).
+    assert "rule" not in choose(video, p, "report", 0.0, 9.0, [], None, tmp_path / "work_r", 6, samples=4)[0].details
