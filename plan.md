@@ -104,8 +104,8 @@ news-clipper/
 
 ---
 
-## M2. 큐시트·원고 연동 및 파서 (파이프라인 4) — 진행 중 (실제 API 검증만 남음)
-> **상태 (2026-11-20)**: Fake 데이터로 DoD 달성. 업로드 폼 큐시트 미리보기, `newsroom` 단계 실행·저장, `WAITING_RUNDOWN`과 수동 재조회, 작업 상세의 큐시트·원고 표가 동작한다. 사용자가 준 실제 응답 JSON(001 11-01, 003 11-04)으로 파싱을 점검했다(아래). 실제 MARS-L 호출(2.10)이 남았다.
+## M2. 큐시트·원고 연동 및 파서 (파이프라인 4) — 완료 (2026-11-20)
+> **상태 (2026-11-20)**: Fake 데이터로 DoD 달성. 업로드 폼 큐시트 미리보기, `newsroom` 단계 실행·저장, `WAITING_RUNDOWN`과 수동 재조회, 작업 상세의 큐시트·원고 표가 동작한다. 사용자가 준 실제 응답 JSON(001 11-01, 003 11-04)으로 파싱을 점검했다(아래). 실제 MARS-L API 호출(2.10)도 확인했다.
 
 **실제 응답 점검 (11-04 뉴스데스크 003, 22아이템)**: 형식 R 5 / S 17이 `remark`·`articleTypeCodeName`과 모두 일치, 업로드 대상 5(R-1~R-5), 원고 추정 길이와 예정 길이 차이 0~12초. 이 데이터를 보고 고친 것: 기자 소개 `○○○ 기자 입니다.`(띄어 쓴 형태)를 intro로 인식, 제목 `최종)` 같은 편집 표시를 방송사로 오인하지 않음, 데스크 이름 대신 사인오프 기자 사용(경고 아님). 그 밖의 관찰: 목록(001)에는 `updateDatetime`이 없고 `inputDateTime`만 있다(→ `confirmed_at`), `channelName`이 목록은 `목포문화방송`, 기사는 `목포`, `remark`에 `어깨걸이` 같은 값도 온다(단신), 기사에 `orgArticleId`, `chDivId`, `orgChDivId`가 있다(명세서에 없음, 쓰지 않음). 002 실제 응답은 아직 받지 않았다(spec 3.1에 따르면 001 원소와 같은 필드)
 
@@ -120,7 +120,7 @@ news-clipper/
 | 2.7 | **예정 길이**: `ancMentCttTime + artclCttTime + artclExtTime`, 없으면 원고 글자 수로 추정 | 구현됨 (`planned_from_article`, `estimate_seconds`) |
 | 2.8 | 파서·판별 단위 테스트 | 구현됨 (`tests/test_script_parser.py`, `tests/test_newsroom.py`) |
 | 2.9 | 업로드 폼의 큐시트 미리보기 API + UI (판 수, 리포트 수, 예정 총 길이, 큐시트 없으면 경고), `WAITING_RUNDOWN` 상태와 수동 재조회 | 완료. 자동 재조회(주기적으로 큐시트 등록 확인)는 하지 않음 — 필요하면 Celery beat로 추가 |
-| 2.10 | 실제 API로 큐시트 조회해 파서 검증 (액세스 키 필요) | 남음. 응답 형식은 확인됨(11-01, 11-04, spec 3.1) |
+| 2.10 | 실제 API로 큐시트 조회해 파서 검증 (액세스 키 필요) | 완료 (2026-11-20). 클라우드 세션에서 `MarsLProvider`로 001(11-01, 11-04)·002·003(2086823) 호출 성공. 003 파싱 결과가 사용자 제공 샘플과 22아이템 모두 동일. 실제 API 모드로 미리보기 API(11-04 뉴스데스크 → #2086823, 2판, 업로드 대상 5)와 `newsroom` 단계(PostgreSQL 저장) 확인. 002의 필드는 001 원소와 같음 |
 | 2.11 | 다른 방송사 리포트 제외(`isSameChannel`/`originChannelName` 우선, 제목 `광주)`, 기자 `이름(광주)`) | 완료. 제외 목록은 `ProgramProfile.excluded_sources`(기본 `광주`, `여수`, API `PUT /api/programs/{id}`) |
 | 2.12 | 제목 정리 보완: `(R-1)`, `/기자명` 접미어 제거, 큐시트 기자(데스크)와 사인오프 기자가 다를 때 사인오프 기자 사용 | 완료 (`/기자명`은 그 아이템 기자 이름일 때만 지움. 사인오프 기자를 `reporter`로, 다르면 원래 큐시트 기자를 `cue_sheet_reporter`로 저장. 11-04 실제 응답에서 리포트 5건 중 4건이 데스크 이름이라 경고로 두지 않음) |
 
@@ -154,7 +154,7 @@ news-clipper/
 **정한 것 (M0·M1)**: 외부 연동은 인터페이스 + Fake 먼저(CLAUDE.md). 모델을 바꾸면 Alembic 마이그레이션(`0003_...`, 파일 이름은 `backend/alembic/versions/000N_설명.py`), `tests/test_migrations.py`가 모델과 일치하는지 확인한다. 테스트 데이터는 합성만 쓴다
 
 **사용자에게 받아야 하는 것**
-- MARS-L 액세스 키: 실제 API 호출(2.10)에만 필요. Fake로 DoD까지는 키 없이 진행할 수 있다
+- ~~MARS-L 액세스 키~~ → 2026-11-20 클라우드 환경 news-clipper의 네트워크 비밀(`api.marsl.co.kr`, 헤더 `Mars-Secret`)로 저장됨. 세션에서 실제 API를 쓸 때는 `NEWSROOM_PROVIDER=marsl MARSL_API_KEY=proxy-injected`로 실행한다(프록시가 실제 키로 바꿔 넣는다). 원래 메모: 실제 API 호출(2.10)에만 필요. Fake로 DoD까지는 키 없이 진행할 수 있다
   - 이 클라우드 환경(news-clipper)은 `api.marsl.co.kr`이 허용 호스트에 없고 저장된 키도 없다. 실제 호출이 필요해지면 환경에 호스트 추가를 요청하고, 키는 채팅이 아니라 자격 증명 입력 양식으로 받는다(헤더 `Mars-Secret`)
   - 앱 서버에서 `api.marsl.co.kr`로 나갈 수 있는지(IP 허용 목록 여부)는 미결 (spec 16)
 - 실제 큐시트·원고(PDF 출력물 또는 API 응답 JSON): 파서 검증용. `eval/data/`에 두고 커밋하지 않는다. 지난 세션의 `eval/data/`는 남아 있지 않다
@@ -285,7 +285,8 @@ news-clipper/
 ## 선행 준비물
 - [x] 골든셋 방송 4편(11-02, 11-04, 11-05, 11-11)의 큐시트·원고·녹화본 — 단, `eval/data/`는 git에 없으므로 M3 회귀 확인 때 다시 올려야 함
 - [x] MARS-L API 명세 (지역MBC-NRCS-B106 V0.2)
-- [ ] MARS-L 액세스 키, 앱 서버에서의 네트워크 접근, 실제 응답 샘플 1건 (M2.10)
+- [x] MARS-L 액세스 키, 실제 응답 샘플 (M2.10, 2026-11-20)
+- [ ] 사내 앱 서버에서 `api.marsl.co.kr` 접근 확인 (클라우드 세션에서는 됨)
 - [ ] Anthropic API 키 (M4, 없으면 원고 기반 기본값으로 진행)
 - [ ] YouTube 테스트 채널 + Google Cloud OAuth 클라이언트 (M7)
 - [ ] YouTube API 할당량 증설 신청 — 승인에 수 주가 걸릴 수 있어 **조기 신청**

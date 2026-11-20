@@ -5,7 +5,7 @@
 
 ## 먼저 읽을 것
 - `spec.md` — 기능 명세(v1.0). 정렬·경계 규칙의 근거는 5.5절
-- `plan.md` — 마일스톤과 진행 상태. M0·M1 완료(로그인 보류), M2는 Fake로 완료(실제 MARS-L 호출 검증 2.10만 남음), 다음 작업은 **M3(정렬)**. M2 절의 "M2에서 정한 것"에 큐시트 대기·재조회 규칙이 있다
+- `plan.md` — 마일스톤과 진행 상태. M0·M1 완료(로그인 보류), M2 완료(실제 MARS-L 호출까지 확인), 다음 작업은 **M3(정렬)**. M2 절의 "M2에서 정한 것"에 큐시트 대기·재조회 규칙이 있다
 - `eval/poc/RESULTS.md` — 정렬 PoC 결과와 방송별 실패 사례
 
 ## 핵심 결정 (바꾸기 전에 사용자와 확인)
@@ -55,7 +55,7 @@ python eval/tools/inspect_rundown.py eval/data/<날짜>-<프로그램>
 - Hugging Face 모델은 `HF_HUB_DISABLE_XET=1`로 받는다. 모델은 `kresnik/wav2vec2-large-xlsr-korean`(1.2GB)
 - deb.debian.org가 막혀 있어 세션 안에서는 백엔드 Docker 이미지(FFmpeg 설치)를 빌드할 수 없다. 이미지 빌드는 CI에서 확인한다. Docker 데몬은 `dockerd`로 직접 띄워야 한다
 - `gh`는 GraphQL이 막혀 있다. PR 생성·병합은 REST(`gh api repos/heeseong/news-clipper/pulls ...`)로 한다
-- `api.marsl.co.kr`은 허용 호스트에 없고 MARS-L 키도 환경에 저장돼 있지 않다. 실제 API가 필요할 때 사용자 승인을 받아 추가한다(키는 채팅으로 받지 않는다)
+- MARS-L 키는 환경의 네트워크 비밀(`api.marsl.co.kr`, 헤더 `Mars-Secret`)로 저장돼 있다(2026-11-20). 실제 API는 `NEWSROOM_PROVIDER=marsl MARSL_API_KEY=proxy-injected`로 호출한다(프록시가 실제 키를 넣는다. 키는 채팅으로 받지 않는다)
 - 이미지에 Python 3.13, Node 22, FFmpeg 6, PostgreSQL 16, Redis 7, Chromium(Playwright)이 있다. 환경의 설정 스크립트가 새 세션 시작 때 `backend/.venv`(uv)와 `frontend/node_modules`(npm ci)를 설치한다(2026-11-19 추가). 없으면 위 "명령"의 `uv venv`, `npm install`로 설치한다
 - 실제 워커·DB로 확인할 때 (테스트에는 필요 없음):
   ```bash
