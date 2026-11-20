@@ -105,11 +105,13 @@ news-clipper/
 ---
 
 ## M2. 큐시트·원고 연동 및 파서 (파이프라인 4) — 진행 중 (실제 API 검증만 남음)
-> **상태 (2026-11-20)**: Fake 데이터로 DoD 달성. 업로드 폼 큐시트 미리보기, `newsroom` 단계 실행·저장, `WAITING_RUNDOWN`과 수동 재조회, 작업 상세의 큐시트·원고 표가 동작한다. 실제 MARS-L 호출(2.10)과 실제 응답 샘플로 Fake 픽스처 필드를 맞추는 일이 남았다.
+> **상태 (2026-11-20)**: Fake 데이터로 DoD 달성. 업로드 폼 큐시트 미리보기, `newsroom` 단계 실행·저장, `WAITING_RUNDOWN`과 수동 재조회, 작업 상세의 큐시트·원고 표가 동작한다. 사용자가 준 실제 응답 JSON(001 11-01, 003 11-04)으로 파싱을 점검했다(아래). 실제 MARS-L 호출(2.10)이 남았다.
+
+**실제 응답 점검 (11-04 뉴스데스크 003, 22아이템)**: 형식 R 5 / S 17이 `remark`·`articleTypeCodeName`과 모두 일치, 업로드 대상 5(R-1~R-5), 원고 추정 길이와 예정 길이 차이 0~12초. 이 데이터를 보고 고친 것: 기자 소개 `○○○ 기자 입니다.`(띄어 쓴 형태)를 intro로 인식, 제목 `최종)` 같은 편집 표시를 방송사로 오인하지 않음, 데스크 이름 대신 사인오프 기자 사용(경고 아님). 그 밖의 관찰: 목록(001)에는 `updateDatetime`이 없고 `inputDateTime`만 있다(→ `confirmed_at`), `channelName`이 목록은 `목포문화방송`, 기사는 `목포`, `remark`에 `어깨걸이` 같은 값도 온다(단신), 기사에 `orgArticleId`, `chDivId`, `orgChDivId`가 있다(명세서에 없음, 쓰지 않음). 002 실제 응답은 아직 받지 않았다(spec 3.1에 따르면 001 원소와 같은 필드)
 
 | # | Task | 상태 |
 |---|---|---|
-| 2.1 | `NewsroomProvider` 인터페이스 + `FakeNewsroomProvider` (MARS-L 실제 응답 형식 그대로인 **합성** JSON 픽스처) | 완료 (`newsroom/provider.py`, `fake.py`, `fixtures/`). 픽스처는 알려진 필드로 만들었다 → 실제 응답 샘플과 필드 비교 남음 |
+| 2.1 | `NewsroomProvider` 인터페이스 + `FakeNewsroomProvider` (MARS-L 실제 응답 형식 그대로인 **합성** JSON 픽스처) | 완료 (`newsroom/provider.py`, `fake.py`, `fixtures/`). 픽스처 필드 구성·순서를 실제 응답(001: 11-01, 003: 11-04)에 맞춤 |
 | 2.2 | `MarsLProvider`: IF_MARSL_001~003 클라이언트(004는 필요 없음, 아래), 인증 헤더 `Mars-Secret`, 공통 오류 응답 처리, 재시도(429·5xx·타임아웃), 필드 별칭·공백·날짜 형식 정규화, `programType == "TV"` 필터 | 구현됨 (`newsroom/marsl.py`, httpx MockTransport 테스트). 실제 서버 호출은 2.10 |
 | 2.3 | Rundown / RundownItem DB 모델, 큐시트 매칭(방송일 + 프로그램명 trim + 시작 시각), 원본 응답 저장, `cueSheetVersion` 기반 최종판 확인·판 변경 차이 기록 | 완료 (`models/rundown.py`, 마이그레이션 0003, `newsroom/matching.py`, `service.py`). 정렬 직전 판 수 재확인은 M3 align 단계에서 `service.fetch`로 |
 | 2.4 | **원고 파서**: 섹션, 인터뷰·스탠드업·사인오프 구분, 발화 아닌 요소 제거, 끊긴 줄 복원, 문장 분할 | 구현됨 (`script_parser.py`) |
@@ -120,7 +122,7 @@ news-clipper/
 | 2.9 | 업로드 폼의 큐시트 미리보기 API + UI (판 수, 리포트 수, 예정 총 길이, 큐시트 없으면 경고), `WAITING_RUNDOWN` 상태와 수동 재조회 | 완료. 자동 재조회(주기적으로 큐시트 등록 확인)는 하지 않음 — 필요하면 Celery beat로 추가 |
 | 2.10 | 실제 API로 큐시트 조회해 파서 검증 (액세스 키 필요) | 남음. 응답 형식은 확인됨(11-01, 11-04, spec 3.1) |
 | 2.11 | 다른 방송사 리포트 제외(`isSameChannel`/`originChannelName` 우선, 제목 `광주)`, 기자 `이름(광주)`) | 완료. 제외 목록은 `ProgramProfile.excluded_sources`(기본 `광주`, `여수`, API `PUT /api/programs/{id}`) |
-| 2.12 | 제목 정리 보완: `(R-1)`, `/기자명` 접미어 제거, 큐시트 기자(데스크)와 사인오프 기자가 다를 때 사인오프 기자 사용 | 완료 (`/기자명`은 그 아이템 기자 이름일 때만 지움. 불일치는 경고 `SIGNOFF_REPORTER_MISMATCH`로 남김) |
+| 2.12 | 제목 정리 보완: `(R-1)`, `/기자명` 접미어 제거, 큐시트 기자(데스크)와 사인오프 기자가 다를 때 사인오프 기자 사용 | 완료 (`/기자명`은 그 아이템 기자 이름일 때만 지움. 사인오프 기자를 `reporter`로, 다르면 원래 큐시트 기자를 `cue_sheet_reporter`로 저장. 11-04 실제 응답에서 리포트 5건 중 4건이 데스크 이름이라 경고로 두지 않음) |
 
 **DoD**: Fake 데이터로 업로드 폼에서 큐시트가 미리 보이고, 리포트 아이템의 원고가 리드·본문·사인오프·메모로 파싱돼 저장된다. 작업의 `newsroom` 단계가 SKIPPED가 아니라 실제로 실행된다. → **달성 (Fake)**
 

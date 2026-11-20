@@ -24,6 +24,8 @@ OWN_DEPARTMENTS = ("보도부", "보도국", "취재부", "편집부", "영상�
 _REPORT_MARK_RE = re.compile(r"^\s*R\s*\]\s*|\s*\(R(?:-\d+)?\)\s*$|^\s*\[?리포트\]\s*")
 _SERIES_RE = re.compile(r"^\s*\[?(?P<series>[^\[\]\s]{1,10})\]\s*")
 _STATION_RE = re.compile(r"^\s*(?P<station>[가-힣]{2,4})\)\s*")
+# Desk notes written the same way as a station prefix ("최종)대불산단…"): removed, not a station.
+EDITORIAL_PREFIXES = ("최종", "수정", "재수정", "긴급", "속보", "단독", "추가", "보완", "확정")
 _REPORTER_UNIT_RE = re.compile(r"^\s*(?P<name>[^\s(]+)\s*\((?P<unit>[^)]+)\)\s*$")
 
 
@@ -34,6 +36,9 @@ def clean_title(raw: str) -> Title:
         prev, text = text, _REPORT_MARK_RE.sub("", text).strip()
     station = None
     m = _STATION_RE.match(text)
+    while m and m.group("station") in EDITORIAL_PREFIXES:
+        text = text[m.end() :].strip()
+        m = _STATION_RE.match(text)
     if m:
         station = m.group("station")
         text = text[m.end() :].strip()
@@ -192,12 +197,10 @@ def build_item(
     if source is None:
         source, source_reason = detect_source(title, unit, (department,))
     signoff = script.signoff_reporter if script is not None else None
-    if script is not None and item_type == ItemType.REPORT and reporter and signoff:
-        if signoff not in reporter:
-            # The cue sheet can name the desk that filed the item; the voice is the sign-off's.
-            script.warnings.append(f"SIGNOFF_REPORTER_MISMATCH:{signoff}!={reporter}")
-            reporter = signoff
-    elif reporter is None and signoff:
+    cue_sheet_reporter = reporter
+    if signoff and (reporter is None or signoff not in reporter):
+        # The cue sheet usually names the desk that filed the item (11-04: 4 of 5 reports);
+        # the reporter is the one who signs off. Not a warning: cue_sheet_reporter keeps the other.
         reporter = signoff
     title = strip_reporter_suffix(title, (reporter, signoff, article.get("reporterName")))
     if planned_seconds is None:
@@ -209,6 +212,7 @@ def build_item(
         article_type=article_type,
         title=title,
         reporter=reporter,
+        cue_sheet_reporter=cue_sheet_reporter if cue_sheet_reporter != reporter else None,
         item_type=item_type,
         type_reason=reason,
         source=source,

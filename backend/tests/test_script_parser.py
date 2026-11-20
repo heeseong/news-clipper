@@ -178,7 +178,7 @@ def test_build_item_from_api_shape():
     assert item.title.clean == "새 다리 개통"
     assert item.planned_seconds == 130
     assert item.estimated_seconds and item.estimated_seconds > 0
-    assert any(w.startswith("SIGNOFF_REPORTER_MISMATCH") for w in item.script.warnings)
+    assert item.reporter == "홍길동" and item.cue_sheet_reporter == "김갑동"  # sign-off wins
 
 
 def test_empty_script_is_other():
@@ -214,7 +214,7 @@ def test_other_station_report_is_not_uploaded():
     assert by_reporter.source == "광주" and not by_reporter.upload
     # The script's sign-off (홍길동) wins over the cue sheet label; the mismatch is a warning.
     assert by_reporter.reporter == "홍길동"
-    assert any(w.startswith("SIGNOFF_REPORTER_MISMATCH") for w in by_reporter.script.warnings)
+    assert by_reporter.cue_sheet_reporter == "이재원"
 
     own_dept = build_item({**base, "article": {**base["article"], "articleTitle": "제목"}}, department="보도부")
     assert own_dept.upload
@@ -302,7 +302,7 @@ def test_signoff_reporter_replaces_desk_and_title_suffix():
     item = build_item({**API_REPORT, "article": article})
     assert item.reporter == "최지훈"
     assert item.title.clean == "항구 정비 착공"
-    assert "SIGNOFF_REPORTER_MISMATCH:최지훈!=이데스크" in item.script.warnings
+    assert item.cue_sheet_reporter == "이데스크" and item.script.warnings == []
     # Only the reporter's own name is removed from the end of the title.
     other = build_item({**API_REPORT, "article": {**API_REPORT["article"], "articleTitle": "광주/전남 첫눈"}})
     assert other.title.clean == "광주/전남 첫눈"
@@ -315,3 +315,26 @@ def test_excluded_sources_come_from_the_caller():
     assert not build_item(raw, excluded_sources=["순천"]).upload
     yeosu = {**raw, "article": {**article, "originChannelName": "여수"}}
     assert build_item(yeosu, excluded_sources=[]).upload  # profile excludes nobody
+
+
+def test_real_api_formatting_quirks():
+    # Shapes seen in the 2026-11-04 API response (synthetic text): spaced intro and sign-off,
+    # marker glued to the speaker, desk as reporterName, editorial title prefix.
+    content = (
+        "◀ 앵 커 ▶\n\n 다리가 개통했습니다.\n\n 이어서 홍길동 기자 입니다.\n\n◀ END ▶\n"
+        " ◀ 리포트 ▶\n \n 다리가 열렸습니다./\n\n◀ INT ▶김철수 / 시민 \n\"좋아요.\"\n\n"
+        "MBC 뉴스 홍길동 기자 입니다\n◀ END ▶\n\n\n"
+    )
+    article = {**API_REPORT["article"], "articleContent": content, "reporterName": "데스크",
+               "originReporterName": "데스크"}
+    item = build_item({**API_REPORT, "article": article})
+    assert item.reporter == "홍길동" and item.cue_sheet_reporter == "데스크"
+    assert [s.kind for s in item.script.lead] == ["anchor", "intro"]
+    assert item.script.report[1].speaker == "김철수 / 시민"
+    assert item.script.signoff_reporter == "홍길동" and item.script.warnings == []
+
+    for prefix in ("최종)", "수정)최종)"):
+        brief = build_item({**API_REPORT, "remark": None,
+                            "article": {**API_REPORT["article"], "articleTitle": f"{prefix}조선소 사고"}})
+        assert brief.title.clean == "조선소 사고" and brief.title.station is None and brief.source is None
+    assert clean_title("광주)기대 뒤집은 KIA").station == "광주"

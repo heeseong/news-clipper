@@ -57,6 +57,7 @@ def upgrade() -> None:
     sa.Column('title_raw', sa.Text(), nullable=True),
     sa.Column('series', sa.String(length=32), nullable=True),
     sa.Column('reporter', sa.String(length=50), nullable=True),
+    sa.Column('cue_sheet_reporter', sa.String(length=50), nullable=True),
     sa.Column('planned_duration', sa.Integer(), nullable=True),
     sa.Column('estimated_duration', sa.Float(), nullable=True),
     sa.Column('remark', sa.String(length=255), nullable=True),

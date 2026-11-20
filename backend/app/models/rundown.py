@@ -74,7 +74,8 @@ class RundownItem(Base):
     title: Mapped[str] = mapped_column(Text)  # cleaned
     title_raw: Mapped[str | None] = mapped_column(Text)
     series: Mapped[str | None] = mapped_column(String(32))
-    reporter: Mapped[str | None] = mapped_column(String(50))
+    reporter: Mapped[str | None] = mapped_column(String(50))  # sign-off reporter
+    cue_sheet_reporter: Mapped[str | None] = mapped_column(String(50))  # reporterName when different
     planned_duration: Mapped[int | None] = mapped_column(Integer)  # seconds (cue sheet 시간)
     estimated_duration: Mapped[float | None] = mapped_column(Float)  # reading-time estimate
     remark: Mapped[str | None] = mapped_column(String(255))

@@ -53,6 +53,7 @@ class RundownItemOut(BaseModel):
     title_raw: str | None
     series: str | None
     reporter: str | None
+    cue_sheet_reporter: str | None
     planned_duration: int | None
     estimated_duration: float | None
     remark: str | None

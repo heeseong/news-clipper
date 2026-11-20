@@ -138,7 +138,10 @@ function ItemTable({ items }: { items: RundownItem[] }) {
                   </span>
                 )}
               </td>
-              <td>{it.reporter ?? "—"}</td>
+              <td title={it.cue_sheet_reporter ? `큐시트 기자: ${it.cue_sheet_reporter} (사인오프 기자로 표시)` : undefined}>
+                {it.reporter ?? "—"}
+                {it.cue_sheet_reporter && <span className="muted small"> ({it.cue_sheet_reporter})</span>}
+              </td>
               <td title={it.source_reason ?? undefined}>{it.source ?? "자사"}</td>
               <td>{formatMinSec(it.planned_duration)}</td>
               <td>{formatMinSec(it.estimated_duration)}</td>

@@ -158,6 +158,7 @@ def _db_item(item: ParsedItem) -> RundownItem:
         title_raw=item.title.raw,
         series=item.title.series,
         reporter=item.reporter,
+        cue_sheet_reporter=item.cue_sheet_reporter,
         planned_duration=item.planned_seconds,
         estimated_duration=item.estimated_seconds,
         remark=item.remark,

@@ -176,6 +176,7 @@ export interface RundownItem {
   title_raw: string | null;
   series: string | null;
   reporter: string | null;
+  cue_sheet_reporter: string | null;
   planned_duration: number | null;
   estimated_duration: number | null;
   remark: string | null;
