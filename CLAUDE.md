@@ -5,7 +5,7 @@
 
 ## 먼저 읽을 것
 - `spec.md` — 기능 명세(v1.0). 정렬·경계 규칙의 근거는 5.5절
-- `plan.md` — 마일스톤과 진행 상태. M0·M1 완료(로그인 보류), 다음 작업은 **M2(큐시트·원고 연동)**. M2 절의 **"M2 시작 가이드"**에 기존 코드와의 연결점, 남은 작업, 사용자에게 받을 것이 정리돼 있다
+- `plan.md` — 마일스톤과 진행 상태. M0·M1 완료(로그인 보류), M2는 Fake로 완료(실제 MARS-L 호출 검증 2.10만 남음), 다음 작업은 **M3(정렬)**. M2 절의 "M2에서 정한 것"에 큐시트 대기·재조회 규칙이 있다
 - `eval/poc/RESULTS.md` — 정렬 PoC 결과와 방송별 실패 사례
 
 ## 핵심 결정 (바꾸기 전에 사용자와 확인)
@@ -24,7 +24,8 @@
 - `backend/app/uploads.py`, `api/uploads.py` — tus 업로드. `intake.py` — 업로드 → 작업 생성(ffprobe 검증, 경고). `storage.py` — 저장 경로
 - `backend/app/core/events.py`, `api/events.py` — Redis pub/sub → SSE 작업 변경 알림
 - `backend/app/api/` — FastAPI 라우터. `backend/app/worker.py` — Celery 앱(큐 media/align/ai/publish)
-- `backend/app/newsroom/` — 원고 파서(`script_parser.py`), 큐시트 아이템 판별·제목 정리·출처 판별(`rundown.py`), 모델(`models.py`)
+- `backend/app/newsroom/` — 원고 파서(`script_parser.py`), 큐시트 아이템 판별·제목 정리·출처 판별(`rundown.py`), 모델(`models.py`), Provider 인터페이스·정규화(`provider.py`), MARS-L 클라이언트(`marsl.py`), Fake(`fake.py` + 합성 `fixtures/`), 큐시트 매칭(`matching.py`), 조회·저장(`service.py`). 설정 `NEWSROOM_PROVIDER=fake|marsl`
+- `backend/app/models/rundown.py` — Rundown, RundownItem (작업당 큐시트 1개)
 - `backend/app/align/korean_text.py` — 정렬용 한글 발음 변환(숫자, 영문, 발음 사전)
 - `backend/tests/` — 단위 테스트. `tests/fixtures/synthetic.py`는 FFmpeg 합성 테스트 영상(컷·무음 위치를 알고 있음)
 - `frontend/` — React + Vite + TS. `src/api/`(API 클라이언트·TanStack Query 훅), `src/pages/`

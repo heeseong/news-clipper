@@ -104,27 +104,36 @@ news-clipper/
 
 ---
 
-## M2. 큐시트·원고 연동 및 파서 (파이프라인 4) — 다음 작업
-> **상태**: 파서·판별 핵심 로직(2.4~2.8, 2.11)은 `backend/app/newsroom/`에 구현돼 있고 단위 테스트가 있다. Provider, DB 모델, 파이프라인 단계, API, 화면 연결이 남았다.
+## M2. 큐시트·원고 연동 및 파서 (파이프라인 4) — 진행 중 (실제 API 검증만 남음)
+> **상태 (2026-11-20)**: Fake 데이터로 DoD 달성. 업로드 폼 큐시트 미리보기, `newsroom` 단계 실행·저장, `WAITING_RUNDOWN`과 수동 재조회, 작업 상세의 큐시트·원고 표가 동작한다. 실제 MARS-L 호출(2.10)과 실제 응답 샘플로 Fake 픽스처 필드를 맞추는 일이 남았다.
 
 | # | Task | 상태 |
 |---|---|---|
-| 2.1 | `NewsroomProvider` 인터페이스 + `FakeNewsroomProvider` (MARS-L 실제 응답 형식 그대로인 **합성** JSON 픽스처) | 남음 |
-| 2.2 | `MarsLProvider`: IF_MARSL_001~003 클라이언트(004는 필요 없음, 아래), 인증 헤더 `Mars-Secret`, 공통 오류 응답 처리, 재시도(429·5xx·타임아웃), 필드 별칭·공백·날짜 형식 정규화, `programType == "TV"` 필터 | 남음 |
-| 2.3 | Rundown / RundownItem DB 모델, 큐시트 매칭(방송일 + 프로그램명 trim + 시작 시각), 원본 응답 저장, `cueSheetVersion` 기반 최종판 확인·판 변경 차이 기록 | 남음 |
+| 2.1 | `NewsroomProvider` 인터페이스 + `FakeNewsroomProvider` (MARS-L 실제 응답 형식 그대로인 **합성** JSON 픽스처) | 완료 (`newsroom/provider.py`, `fake.py`, `fixtures/`). 픽스처는 알려진 필드로 만들었다 → 실제 응답 샘플과 필드 비교 남음 |
+| 2.2 | `MarsLProvider`: IF_MARSL_001~003 클라이언트(004는 필요 없음, 아래), 인증 헤더 `Mars-Secret`, 공통 오류 응답 처리, 재시도(429·5xx·타임아웃), 필드 별칭·공백·날짜 형식 정규화, `programType == "TV"` 필터 | 구현됨 (`newsroom/marsl.py`, httpx MockTransport 테스트). 실제 서버 호출은 2.10 |
+| 2.3 | Rundown / RundownItem DB 모델, 큐시트 매칭(방송일 + 프로그램명 trim + 시작 시각), 원본 응답 저장, `cueSheetVersion` 기반 최종판 확인·판 변경 차이 기록 | 완료 (`models/rundown.py`, 마이그레이션 0003, `newsroom/matching.py`, `service.py`). 정렬 직전 판 수 재확인은 M3 align 단계에서 `service.fetch`로 |
 | 2.4 | **원고 파서**: 섹션, 인터뷰·스탠드업·사인오프 구분, 발화 아닌 요소 제거, 끊긴 줄 복원, 문장 분할 | 구현됨 (`script_parser.py`) |
 | 2.5 | 메모 파싱(썸네일·상단·수퍼), 제목 정리(`R]`, `(R)` 등) | 구현됨. 단 실제 API의 `memo`는 비어 있음(spec 3.1) |
 | 2.6 | **형식(R/S) 판별**: `remark` → `articleTypeCode`(003의 `article`에 들어 있음) → 원고 구조. 판별 근거 저장 | 구현됨 (`rundown.classify`). 004 매칭은 필요 없음 |
 | 2.7 | **예정 길이**: `ancMentCttTime + artclCttTime + artclExtTime`, 없으면 원고 글자 수로 추정 | 구현됨 (`planned_from_article`, `estimate_seconds`) |
-| 2.8 | 파서·판별 단위 테스트 | 구현됨 (`tests/test_script_parser.py`) |
-| 2.9 | 업로드 폼의 큐시트 미리보기 API + UI (판 수, 리포트 수, 예정 총 길이, 큐시트 없으면 경고), `WAITING_RUNDOWN` 상태와 수동 재조회 | 남음 |
-| 2.10 | 실제 API로 큐시트 조회해 파서 검증 (액세스 키 필요) | 응답 형식은 확인됨(11-01, 11-04, spec 3.1). 서비스 코드로 실제 호출은 남음 |
-| 2.11 | 다른 방송사 리포트 제외(`isSameChannel`/`originChannelName` 우선, 제목 `광주)`, 기자 `이름(광주)`) | 로직 구현됨. 제외 목록을 `ProgramProfile.excluded_sources`와 연결하는 일이 남음 (지금은 `rundown.EXCLUDED_SOURCES` 상수) |
-| 2.12 | 제목 정리 보완: `(R-1)`, `/기자명` 접미어 제거, 큐시트 기자(데스크)와 사인오프 기자가 다를 때 사인오프 기자 사용 | 남음 (`(R-1)`은 이미 처리됨) |
+| 2.8 | 파서·판별 단위 테스트 | 구현됨 (`tests/test_script_parser.py`, `tests/test_newsroom.py`) |
+| 2.9 | 업로드 폼의 큐시트 미리보기 API + UI (판 수, 리포트 수, 예정 총 길이, 큐시트 없으면 경고), `WAITING_RUNDOWN` 상태와 수동 재조회 | 완료. 자동 재조회(주기적으로 큐시트 등록 확인)는 하지 않음 — 필요하면 Celery beat로 추가 |
+| 2.10 | 실제 API로 큐시트 조회해 파서 검증 (액세스 키 필요) | 남음. 응답 형식은 확인됨(11-01, 11-04, spec 3.1) |
+| 2.11 | 다른 방송사 리포트 제외(`isSameChannel`/`originChannelName` 우선, 제목 `광주)`, 기자 `이름(광주)`) | 완료. 제외 목록은 `ProgramProfile.excluded_sources`(기본 `광주`, `여수`, API `PUT /api/programs/{id}`) |
+| 2.12 | 제목 정리 보완: `(R-1)`, `/기자명` 접미어 제거, 큐시트 기자(데스크)와 사인오프 기자가 다를 때 사인오프 기자 사용 | 완료 (`/기자명`은 그 아이템 기자 이름일 때만 지움. 불일치는 경고 `SIGNOFF_REPORTER_MISMATCH`로 남김) |
 
-**DoD**: Fake 데이터로 업로드 폼에서 큐시트가 미리 보이고, 리포트 아이템의 원고가 리드·본문·사인오프·메모로 파싱돼 저장된다. 작업의 `newsroom` 단계가 SKIPPED가 아니라 실제로 실행된다.
+**DoD**: Fake 데이터로 업로드 폼에서 큐시트가 미리 보이고, 리포트 아이템의 원고가 리드·본문·사인오프·메모로 파싱돼 저장된다. 작업의 `newsroom` 단계가 SKIPPED가 아니라 실제로 실행된다. → **달성 (Fake)**
+
+### M2에서 정한 것
+- 큐시트를 못 찾으면(없음, 프로그램 미지정, 같은 이름이 여러 개인데 방송 시각으로 못 고름) 단계는 `WAITING`, 작업은 그 단계 묶음이 끝난 뒤 `WAITING_RUNDOWN`. 같은 묶음에서 실패한 단계가 있으면 `FAILED`가 우선
+- `POST /api/jobs/{id}/rundown/refresh {cue_sheet_id?}`는 `newsroom` 단계부터 재실행한다(`retry_step`). 같은 묶음의 프록시·분석이 아직 실행 중이면 409 — 끝난 뒤 다시 조회
+- 사용자가 고른 큐시트는 `Job.params.cue_sheet_id`에 저장하고 이름 매칭보다 우선한다
+- 판 수나 큐시트가 바뀐 채 다시 가져오면 `Rundown.changes`에 추가·삭제·순서 변경·수정 아이템을 기록한다(키: `cueSheetItemId`)
+- 저장: `jobs/{id}/newsroom/rundown.json`(002·003 `data` 원본), `scripts/{item_no}.json`(파싱 결과), DB `rundowns.raw`
+- `NEWSROOM_PROVIDER=fake`(기본)는 픽스처 큐시트를 **모든 날짜에** 내준다(`FAKE_NEWSROOM_ANY_DATE`). 합성 녹화본을 아무 날짜로 올려도 매칭된다. 픽스처: 뉴스데스크 19:30(7아이템, 업로드 대상 4), 뉴스투데이 06:00, 라디오 1건
 
 ### M2 시작 가이드 (새 세션용)
+> 2026-11-20 기준 아래 연결점은 모두 구현됐다. 남은 일은 "사용자에게 받아야 하는 것"(키, 실제 응답 샘플)뿐이다.
 
 **먼저 읽을 것**: spec 3.1(MARS-L API, 실제 응답 특징), 3.2(출처 판별), 5.4(큐시트 매칭 규칙), 10(`WAITING_RUNDOWN`)
 

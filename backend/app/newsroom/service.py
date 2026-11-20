@@ -60,15 +60,17 @@ def find_rundown(
     program: ProgramInfo,
     cue_sheet_id: int | None = None,
 ) -> MatchResult:
-    """Pick the cue sheet. A cue sheet chosen by the user is fetched directly by id."""
-    if cue_sheet_id is not None:
+    """Pick the cue sheet: by name and time, or the one the user chose (looked up by id when it is
+    not in the day's list)."""
+    day = provider.list_rundowns(broadcast_date, broadcast_date)
+    match = match_rundown(day, program.name, program.broadcast_time, cue_sheet_id)
+    if cue_sheet_id is not None and match.chosen is None:
         try:
             chosen = provider.get_rundown(cue_sheet_id)
         except NewsroomNotFound:
             return MatchResult(None, [], f"선택한 큐시트(#{cue_sheet_id})를 찾을 수 없습니다")
         return MatchResult(chosen, [chosen], "사용자가 선택", version_warnings(chosen))
-    day = provider.list_rundowns(broadcast_date, broadcast_date)
-    return match_rundown(day, program.name, program.broadcast_time)
+    return match
 
 
 def parse_items(raw_items: list[dict[str, Any]], excluded_sources: list[str] | None) -> list[ParsedItem]:
@@ -97,7 +99,7 @@ def fetch(
     if match.chosen is None:
         raise RundownNotFound(match.reason)
     # The list entry can be stale; IF_MARSL_002 has the current edition.
-    summary = provider.get_rundown(match.chosen.cue_sheet_id) if cue_sheet_id is None else match.chosen
+    summary = provider.get_rundown(match.chosen.cue_sheet_id)
     raw_items = provider.get_items(summary.cue_sheet_id)
     items = parse_items(raw_items, program.excluded_sources)
     warnings = [*version_warnings(summary), *item_warnings(items)]

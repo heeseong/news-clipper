@@ -455,3 +455,69 @@ button.link {
 button.link:hover {
   text-decoration: underline;
 }
+
+/* newsroom (cue sheet) */
+.step-waiting {
+  border-left-color: var(--warn);
+}
+.warn-text {
+  color: var(--warn);
+}
+.ok-box {
+  margin: 0 0 1rem;
+  padding: 0.6rem 0.9rem;
+  border: 1px solid #b7dcc5;
+  background: #eef8f1;
+  border-radius: 6px;
+}
+.rundown-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+div.rundown-preview.warn-box {
+  padding-left: 0.9rem;
+}
+.rundown-preview ul {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+.rundown-preview select {
+  font: inherit;
+  padding: 0.2rem 0.4rem;
+  max-width: 100%;
+}
+.rundown-preview .tag {
+  margin-left: 0.4rem;
+}
+.rundown-panel {
+  margin-top: 1.5rem;
+}
+.rundown-panel .page-head h2 {
+  margin: 0;
+}
+.rundown-table td {
+  vertical-align: top;
+}
+.rundown-table .row-muted td {
+  color: var(--muted);
+}
+.rundown-table .tag {
+  margin-right: 0.3rem;
+}
+.rundown-table td .tag-warn {
+  margin-left: 0.4rem;
+}
+.script ol {
+  margin: 0.4rem 0 0;
+  padding-left: 1.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.sentence-report .tag {
+  background: #e8eefb;
+}
+.script .tag {
+  margin-right: 0.4rem;
+}

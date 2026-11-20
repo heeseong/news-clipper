@@ -19,8 +19,29 @@ export const STEP_STATUS_LABEL: Record<StepStatus, string> = {
   RETRYING: "재시도 예정",
   SUCCEEDED: "완료",
   SKIPPED: "미구현",
+  WAITING: "큐시트 대기",
   FAILED: "실패",
 };
+
+export const ITEM_TYPE_LABEL: Record<string, string> = { R: "리포트", S: "단신", OTHER: "기타" };
+
+export const SENTENCE_KIND_LABEL: Record<string, string> = {
+  anchor: "앵커",
+  intro: "기자 소개",
+  narration: "내레이션",
+  interview: "인터뷰",
+  sync: "현장 발언",
+  ambient: "현장음",
+  standup: "스탠드업",
+  signoff: "사인오프",
+};
+
+/** 125 -> "2:05" (planned lengths on the cue sheet). */
+export function formatMinSec(seconds: number | null | undefined): string {
+  if (seconds == null) return "—";
+  const s = Math.round(seconds);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
 
 export const STAGE_LABEL: Record<string, string> = {
   processing: "수집·분석",
@@ -46,6 +67,7 @@ export function tone(status: JobStatus | StepStatus): "ok" | "busy" | "warn" | "
     case "FAILED":
       return "error";
     case "RETRYING":
+    case "WAITING":
     case "WAITING_RUNDOWN":
       return "warn";
     case "PENDING":

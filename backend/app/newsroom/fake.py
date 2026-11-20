@@ -44,6 +44,7 @@ class FakeNewsroomProvider:
         self.items = items  # cueSheetId -> IF_MARSL_003 `data`
         self.any_date = any_date
         self.calls: list[tuple[str, Any]] = []
+        self._listed_date: date | None = None  # any_date: the date the last list was asked for
         # Set to an exception to make every call raise it (tests).
         self.fail_with: Exception | None = None
 
@@ -70,6 +71,7 @@ class FakeNewsroomProvider:
 
     def list_rundowns(self, start: date, end: date) -> list[RundownSummary]:
         self._check("list", (start, end))
+        self._listed_date = start
         out = []
         for raw in self.cue_sheets:
             if self.any_date:
@@ -81,7 +83,10 @@ class FakeNewsroomProvider:
 
     def get_rundown(self, cue_sheet_id: int) -> RundownSummary:
         self._check("get", cue_sheet_id)
-        return summary_from_raw(copy.deepcopy(self._raw(cue_sheet_id)))
+        raw = copy.deepcopy(self._raw(cue_sheet_id))
+        if self.any_date and self._listed_date:
+            raw["broadcastDate"] = self._listed_date.isoformat()
+        return summary_from_raw(raw)
 
     def get_items(self, cue_sheet_id: int) -> list[dict[str, Any]]:
         self._check("items", cue_sheet_id)
