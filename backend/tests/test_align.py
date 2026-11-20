@@ -414,3 +414,27 @@ def test_briefs_are_clipped_without_signoff_flag():
     clips = {c.order: c for c in plan_clips(b.lp, items, b.cuts, b.silences, FPS).clips}
     assert clips[2].flags == [] and clips[2].start_snap == "scene" and clips[2].end_snap == "next_item_cut"
     assert "NO_SIGNOFF" in clips[3].flags  # a report is expected to sign off
+
+
+def test_brief_end_reaches_a_later_cut_over_silent_footage():
+    b = broadcast([(1, R1, True), (2, B2, True), (3, R3, True)], gap=6.0)  # 6 s of silent footage
+    items = b.items
+    # A report in the same place keeps the ±3 s rule: it ends after its sign-off.
+    report2 = AlignItem(2, ItemType.REPORT, True, items[1].planned_seconds, None, B2)
+    for second, expect in ((items[1], "next_item_cut"), (report2, "align")):
+        clips = {c.order: c for c in plan_clips(b.lp, [items[0], second, items[2]], b.cuts, b.silences, FPS).clips}
+        assert clips[2].end_snap == expect
+        if expect == "next_item_cut":
+            assert clips[2].end == pytest.approx(b.cuts[2] - 0.5 / FPS, abs=1e-3)
+
+
+def test_brief_end_stays_when_something_is_said_before_the_cut():
+    b = broadcast([(1, R1, True), (2, B2, True), (3, R3, True)], gap=6.0)
+    # Speech (not in any script) in the gap after the brief.
+    extra = speech_logprobs(b.lp.duration, [(b.ends[2] + 2.0, FILLER)], b.lp.vocab)
+    spoken = extra.lpz.argmax(axis=1) != extra.blank
+    lpz = b.lp.lpz.copy()
+    lpz[spoken] = extra.lpz[spoken]
+    lp = LogProbs(lpz, b.lp.frame_sec, 0.0, b.lp.vocab, b.lp.blank)
+    assert not boundaries.silent_tail(b.ends[2], b.cuts[2], b.starts[3], lp)
+    assert boundaries.silent_tail(b.ends[2], b.cuts[2], b.starts[3], b.lp)

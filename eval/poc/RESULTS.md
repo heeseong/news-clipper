@@ -253,3 +253,9 @@ cut (+1 frame) and 12/14 end on the next anchor cut (-½ frame), checked on fram
 (11-19 S12, S13) end at last sentence + 0.4 s in the middle of the brief's footage: the next anchor
 cut is more than 3 s after the speech (S12: 2.6 s of silent footage after the speech; S13: the next
 item was not aligned). Briefs near the end of a truncated recording were rejected as before.
+
+Follow-up (user decision): a brief now also ends at the next anchor cut when it is more than 3 s
+(up to 10 s) after the last sentence and the model hears no speech in between (< 4 syllables);
+its length check stops at the last sentence + 0.4 s. Reports keep the ±3 s rule. Re-scored: reports
+10/10 on 11-16 and 11-19 (unchanged); 11-19 S12 now ends on the next anchor cut (1165.213 s,
+S13 starts at 1165.263 s). S13 still ends at its last sentence + 0.4 s because item 14 was not aligned.

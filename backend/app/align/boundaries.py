@@ -9,6 +9,8 @@ Ported from eval/poc/align_poc.py. Start:
    lead: a greeting, possibly begun over the studio wide shot (11-05, 11-11), so it is left out;
 4. without a usable cut: inside the silence before the lead (silence end - 0.5 s), else onset - 0.3 s.
 Briefs (straight items) use the same rules, ending at their last sentence instead of a sign-off.
+A brief also ends at a next-item cut up to 10 s after its last sentence when the model hears no
+speech in between (its footage runs on silently); a report keeps the ±3 s rule.
 End: the cut that opens the next aligned item (found from that item's lead onset the same way)
 - ½ frame, if it lies within ±3 s of the sign-off end; otherwise sign-off end + 0.4 s (the
 sign-off, last in its window, can absorb up to ~2 s of the following audio).
@@ -25,6 +27,10 @@ from .logprobs import LogProbs
 
 START_SNAP = (-3.0, 0.5)  # cut search range around the lead onset
 END_CUT_RANGE = 3.0  # next item's cut must be within this of the sign-off end
+# Briefs (2026-11-20): their footage often runs on silently after the last sentence. The clip may
+# reach a next-item cut further away if nothing is said in between (fewer syllables than a greeting).
+BRIEF_MAX_TAIL = 10.0  # at most this long after the last sentence
+TAIL_SPEECH_GUARD = 0.2  # skip the very end of the last sentence when listening for speech
 END_PAD = 0.4
 GREETING_SYLLABLES = 4  # syllables between cut and lead that mean "a greeting"
 SILENCE_BEFORE_LEAD = (-1.5, 0.7)  # silence end within [onset - 1.5, onset + 0.7]
@@ -79,6 +85,14 @@ def clip_start(
     return lead_onset - NO_SILENCE_BACKOFF, "align"
 
 
+def silent_tail(last_offset: float, cut: float, next_onset: float, lp: LogProbs) -> bool:
+    """Nothing is said between a brief's last sentence and the next item's cut."""
+    if not (last_offset < cut <= last_offset + BRIEF_MAX_TAIL):
+        return False
+    heard = lp.syllables_between(last_offset + TAIL_SPEECH_GUARD, min(cut, next_onset))
+    return heard < GREETING_SYLLABLES
+
+
 def decide_boundaries(
     alignments: list[ItemAlignment],
     upload_orders: set[int],
@@ -119,9 +133,14 @@ def decide_boundaries(
         nxt = next((t for o, t in item_starts if o > a.order), None)
         if nxt is not None:
             cut = snap_before(nxt, cut_arr)
-            if cut is not None and abs(cut - signoff.offset) <= END_CUT_RANGE:
+            if cut is not None and (
+                abs(cut - signoff.offset) <= END_CUT_RANGE
+                or (a.order not in report_orders and silent_tail(signoff.offset, cut, nxt, lp))
+            ):
                 end, end_snap = cut - 0.5 / fps, "next_item_cut"  # stop before the blended cut frame
-        if duration_off(end - start, planned.get(a.order)):
+        # A brief's length is checked on its spoken part: the silent footage tail is not counted.
+        measured_end = end if a.order in report_orders else min(end, signoff.offset + END_PAD)
+        if duration_off(measured_end - start, planned.get(a.order)):
             flags.append(Flag.DURATION_MISMATCH)
         out.append(
             ClipBoundary(
