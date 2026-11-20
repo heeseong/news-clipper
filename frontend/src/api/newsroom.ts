@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api } from "./client";
-import type { JobDetail, Rundown, RundownPreview } from "./types";
+import type { Clip, JobDetail, Rundown, RundownPreview } from "./types";
 
 /** Which cue sheet a recording of this program and date would be matched to (upload form). */
 export function useRundownPreview(programId: number | null, date: string, cueSheetId: number | null, enabled = true) {
@@ -36,5 +36,15 @@ export function useRefreshRundown(jobId: number) {
       qc.setQueryData(["jobs", jobId], job);
       qc.invalidateQueries({ queryKey: ["jobs"], exact: true });
     },
+  });
+}
+
+/** Report clips made by the align step. `version` changes whenever that step finishes again. */
+export function useJobClips(jobId: number, version: string | null) {
+  return useQuery({
+    queryKey: ["jobs", jobId, "clips", version],
+    queryFn: () => api.get<Clip[]>(`/api/jobs/${jobId}/clips`),
+    enabled: version !== null,
+    staleTime: Infinity,
   });
 }

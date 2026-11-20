@@ -59,6 +59,11 @@ class RundownItemOut(BaseModel):
     remark: str | None
     parsed_script: dict[str, Any] | None
     parse_warnings: list[str]
+    align_status: str | None = None  # ALIGNED / NOT_FOUND / NO_SCRIPT
+    aligned_start: float | None = None
+    aligned_end: float | None = None
+    align_score: float | None = None
+    align_flags: list[str] = []
 
 
 class RundownOut(BaseModel):
@@ -82,3 +87,37 @@ class RundownOut(BaseModel):
 
 class RundownRefreshIn(BaseModel):
     cue_sheet_id: int | None = Field(None, description="Use this cue sheet instead of matching by name")
+
+
+class ClipOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    job_id: int
+    rundown_item_id: int
+    item_no: int = 0
+    title: str = ""
+    reporter: str | None = None
+    planned_duration: int | None = None
+    status: str
+    start_sec: float | None
+    end_sec: float | None
+    start_snap: str | None
+    end_snap: str | None
+    suggested_start: float | None
+    suggested_end: float | None
+    confidence: float | None
+    flags: list[str]
+    needs_manual_range: bool
+
+
+class AlignedSentenceOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    seq: int
+    section: str
+    kind: str
+    text: str
+    start_sec: float
+    end_sec: float
+    score: float

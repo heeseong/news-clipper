@@ -5,7 +5,7 @@
 
 ## 먼저 읽을 것
 - `spec.md` — 기능 명세(v1.0). 정렬·경계 규칙의 근거는 5.5절
-- `plan.md` — 마일스톤과 진행 상태. M0·M1 완료(로그인 보류), M2 완료(실제 MARS-L 호출까지 확인), 다음 작업은 **M3(정렬)**. M2 절의 "M2에서 정한 것"에 큐시트 대기·재조회 규칙이 있다
+- `plan.md` — 마일스톤과 진행 상태. M0·M1 완료(로그인 보류), M2 완료, M3는 골든셋 회귀 확인(3.8)만 남음. 각 마일스톤의 "정한 것"에 규칙이 있다
 - `eval/poc/RESULTS.md` — 정렬 PoC 결과와 방송별 실패 사례
 
 ## 핵심 결정 (바꾸기 전에 사용자와 확인)
@@ -26,28 +26,32 @@
 - `backend/app/api/` — FastAPI 라우터. `backend/app/worker.py` — Celery 앱(큐 media/align/ai/publish)
 - `backend/app/newsroom/` — 원고 파서(`script_parser.py`), 큐시트 아이템 판별·제목 정리·출처 판별(`rundown.py`), 모델(`models.py`), Provider 인터페이스·정규화(`provider.py`), MARS-L 클라이언트(`marsl.py`), Fake(`fake.py` + 합성 `fixtures/`), 큐시트 매칭(`matching.py`), 조회·저장(`service.py`). 설정 `NEWSROOM_PROVIDER=fake|marsl`
 - `backend/app/models/rundown.py` — Rundown, RundownItem (작업당 큐시트 1개)
-- `backend/app/align/korean_text.py` — 정렬용 한글 발음 변환(숫자, 영문, 발음 사전)
+- `backend/app/align/` — 정렬(M3): 발음 변환(`korean_text.py`), log-prob(`logprobs.py`), wav2vec2 모델(`acoustic.py`, torch는 선택 의존성 `[model]`), 아이템 순차 정렬·판정(`aligner.py`), 경계 결정(`boundaries.py`), 클립 생성·저장(`service.py`). 상수는 PoC 그대로 — 바꾸면 골든셋을 다시 돌린다
+- `backend/app/models/clip.py` — Clip(DRAFT, 판정 실패면 구간 null), AlignedSentence
 - `backend/tests/` — 단위 테스트. `tests/fixtures/synthetic.py`는 FFmpeg 합성 테스트 영상(컷·무음 위치를 알고 있음)
 - `frontend/` — React + Vite + TS. `src/api/`(API 클라이언트·TanStack Query 훅), `src/pages/`
 - `docker-compose.yml` — 서버 한 대 배포(postgres, redis, migrate, api, 워커 4개, web)
 - `eval/tools/` — MARS-L 출력물(PDF) → API 형식 JSON 변환기(API 키를 받기 전 임시용), 파싱 검토 리포트 생성
-- `eval/poc/` — 정렬 PoC 스크립트(`compute_logits.py`, `align_poc.py`). M3에서 `backend/app/align/`으로 옮긴다
+- `eval/poc/` — 정렬 PoC 스크립트(`compute_logits.py`, `align_poc.py`). 서비스 코드는 `backend/app/align/`
+- `eval/tools/score_alignment.py` — 서비스 정렬을 녹화본 한 편에 돌려 `ground_truth.json`과 비교(골든셋 회귀)
 
 ## 명령
 ```bash
 cd backend && uv venv && uv pip install -e ".[dev]"
+cd backend && uv pip install torch --index-url https://download.pytorch.org/whl/cpu && uv pip install -e ".[model]"   # 실제 정렬 모델(선택)
 cd backend && .venv/bin/python -m pytest -q   # SQLite + Celery 즉시 실행. 외부 서비스 불필요
 cd backend && .venv/bin/ruff check .
 cd frontend && npm install && npm run lint && npm run build
 docker compose up -d --build                  # 전체 스택, http://localhost:8080
 python eval/tools/marsl_pdf_export.py CUESHEET.pdf SCRIPTS.pdf eval/data/<날짜>-<프로그램>
 python eval/tools/inspect_rundown.py eval/data/<날짜>-<프로그램>
+cd backend && .venv/bin/python ../eval/tools/score_alignment.py ../eval/data/<날짜>-<프로그램>   # 골든셋 채점
 ```
 정렬 PoC 실행 방법은 `eval/poc/RESULTS.md`와 `eval/poc/requirements.txt`를 본다.
 
 ## 데이터 규칙
 - 실제 방송 자료(녹화본, 큐시트·원고 PDF, 정답, 클립)는 `eval/data/`에 두고 **커밋하지 않는다**(.gitignore). 세션이 바뀌면 사라지므로 필요할 때 사용자에게 다시 받는다
-- 테스트에는 합성 데이터만 쓴다
+- 테스트에는 합성 데이터만 쓴다. 테스트는 실제 정렬 모델을 불러오지 않는다(`conftest.py`가 무음 log-prob으로 바꿔 끼움)
 
 ## 환경 메모 (클라우드 세션)
 - 이 저장소는 클라우드 환경 **news-clipper**에서 작업한다. Hugging Face, download.pytorch.org가 허용돼 있다

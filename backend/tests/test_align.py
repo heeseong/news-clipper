@@ -378,3 +378,22 @@ def test_newsroom_refetch_drops_clips_of_old_items(aligned_job):
 def test_parsed_fixture_scripts_match_the_synthetic_speech():
     item = rd.build_item(api_item(1, "새 다리 개통(R)", R1, report_item=True, planned=10))
     assert [s.text for s in item.script.sentences] == [s.text for s in R1]
+
+
+def test_clip_api(aligned_job, client):
+    job_id, b, _ = aligned_job
+    tasks.start_job(job_id)
+    clips = client.get(f"/api/jobs/{job_id}/clips").json()
+    assert [(c["item_no"], c["title"], c["needs_manual_range"]) for c in clips] == [
+        (1, "새 다리 개통", False),
+        (3, "섬마을 의료", False),
+    ]
+    sents = client.get(f"/api/clips/{clips[0]['id']}/sentences").json()
+    assert [s["kind"] for s in sents] == ["anchor", "intro", "narration", "signoff"]
+    item = client.get(f"/api/jobs/{job_id}/rundown").json()["items"][0]
+    assert item["align_status"] == "ALIGNED" and item["aligned_start"] is not None
+    assert client.get("/api/clips/999").status_code == 404
+
+    pid = client.get("/api/programs").json()[0]["id"]
+    r = client.put(f"/api/programs/{pid}", json={"name": "뉴스데스크", "pronunciations": {" LG ": "엘지"}})
+    assert r.json()["pronunciations"] == {"LG": "엘지"}

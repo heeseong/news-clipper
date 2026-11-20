@@ -25,3 +25,17 @@ so some spaces are lost at wrap points. This does not affect sentence or
 section boundaries.
 
 Requires `pdfplumber` (PDF converter only) and `pydantic`.
+
+## Alignment regression (golden sets)
+
+`tools/score_alignment.py` runs the service alignment (`backend/app/align`, the code the
+pipeline uses) on one broadcast and scores the report boundaries against
+`ground_truth.json`. Write the ground truth **before** looking at the result.
+
+```bash
+cd backend && .venv/bin/python ../eval/tools/score_alignment.py ../eval/data/2026-11-04-newsdesk
+```
+
+DATA_DIR holds `items.json` (IF_MARSL_003 response), the recording, and optionally
+`ground_truth.json`; intermediate files are cached in `DATA_DIR/work/`. See the script's
+docstring for the ground-truth format. Needs the `model` extra (torch, transformers).

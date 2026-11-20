@@ -182,6 +182,31 @@ export interface RundownItem {
   remark: string | null;
   parsed_script: ParsedScript | null;
   parse_warnings: string[];
+  align_status: "ALIGNED" | "NOT_FOUND" | "NO_SCRIPT" | null;
+  aligned_start: number | null;
+  aligned_end: number | null;
+  align_score: number | null;
+  align_flags: string[];
+}
+
+export interface Clip {
+  id: number;
+  job_id: number;
+  rundown_item_id: number;
+  item_no: number;
+  title: string;
+  reporter: string | null;
+  planned_duration: number | null;
+  status: string;
+  start_sec: number | null;
+  end_sec: number | null;
+  start_snap: string | null;
+  end_snap: string | null;
+  suggested_start: number | null;
+  suggested_end: number | null;
+  confidence: number | null;
+  flags: string[];
+  needs_manual_range: boolean;
 }
 
 export interface RundownChange {
