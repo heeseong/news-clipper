@@ -1,11 +1,11 @@
 # News Clipper
 
-종합뉴스 녹화본을 큐시트·원고(MARS-L)에 맞춰 리포트 단위로 자르고, 검수를 거쳐 YouTube에 예약 업로드하는 사내 웹앱.
+종합뉴스 녹화본을 큐시트·원고(MARS-L)에 맞춰 기사(리포트·스트레이트) 단위로 자르고, 검수를 거쳐 YouTube에 예약 업로드하는 사내 웹앱.
 사용자와는 **한국어**로 대화한다.
 
 ## 먼저 읽을 것
 - `spec.md` — 기능 명세(v1.0). 정렬·경계 규칙의 근거는 5.5절
-- `plan.md` — 마일스톤과 진행 상태. M0·M1 완료(로그인 보류), M2 완료, M3는 골든셋 회귀 확인(3.8)만 남음. 각 마일스톤의 "정한 것"에 규칙이 있다
+- `plan.md` — 마일스톤과 진행 상태. M0~M3 완료(로그인 보류, M3는 원래 골든셋 4편 재현만 남음). 다음 작업은 **M4(메타데이터·썸네일)**: M4 절의 **"M4 시작 가이드"**에 지금 상태, 연결점, 만들 것, 사용자에게 받을 것이 정리돼 있다. 각 마일스톤의 "정한 것"에 규칙이 있다
 - `eval/poc/RESULTS.md` — 정렬 PoC 결과와 방송별 실패 사례
 
 ## 핵심 결정 (바꾸기 전에 사용자와 확인)
@@ -13,19 +13,19 @@
 - 업로드 대상은 큐시트 형식 `R`(리포트)과 `S`(스트레이트·단신) 중 **자사 기사** (2026-11-20 변경, 이전에는 리포트만). 헤드라인(`주요뉴스`), 타이틀, 클로징은 제외. 광주MBC·여수MBC 기사도 제외
 - **뉴스투데이는 전날 뉴스데스크에서 나간 기사를 뺀다**(2026-11-20). 같은 기사 판별: 기사 ID(`articleId`·`orgArticleId` 교차) → 정규화 제목 + 기자. 원고를 줄이거나 다시 편집했으면(원고 유사도 90% 미만) 새 기사로 업로드. 프로그램 프로필 `dedupe_program`(뉴스투데이 기본값 `뉴스데스크`), 코드는 `newsroom/dedupe.py`
 - 클립 = 리드 첫 문장(앵커 인사말 제외) ~ 다음 아이템 앵커 샷 컷. 단신도 같은 규칙(사인오프 대신 마지막 문장. 말 없는 자료화면이 이어지면 최대 10초 뒤의 다음 앵커 컷까지)
-- 모든 클립은 검수·승인 후 업로드. 정렬 판정에 실패한 리포트는 자동으로 자르지 않고 검수자가 직접 지정
+- 모든 클립은 검수·승인 후 업로드. 정렬 판정에 실패한 기사는 자동으로 자르지 않고 검수자가 직접 지정
 - 스택: Python 3.12 / FastAPI / Celery+Redis / PostgreSQL / FFmpeg, React+Vite+TS, Docker Compose
 - 외부 연동(MARS-L, Claude, YouTube)은 인터페이스 + Fake 구현을 먼저 만든다
 
 ## 저장소 구조 (현재)
 - `backend/app/core/` — 설정(`config.py`, 환경변수), JSON 로깅, DB 세션
-- `backend/app/models/` — SQLAlchemy 모델(User, ProgramProfile, Job, JobStep). 바꾸면 Alembic 마이그레이션(`backend/alembic/`)도 만든다
+- `backend/app/models/` — SQLAlchemy 모델(User, ProgramProfile, Job, JobStep, Rundown, RundownItem, Clip, AlignedSentence). 바꾸면 Alembic 마이그레이션(`backend/alembic/versions/000N_설명.py`, 현재 0005)도 만든다
 - `backend/app/pipeline/` — 단계 정의(`definition.py`), 상태 전이(`orchestrator.py`, Celery 없음), Celery 태스크(`tasks.py`), 단계 처리기(`handlers.py`, `@register("proxy")`). 처리기가 없는 단계는 SKIPPED
 - `backend/app/media/` — ffprobe·ffmpeg 래퍼(`ffmpeg.py`), 프록시·스프라이트·파형(`proxy.py`), 정렬용 오디오·장면 전환·무음(`analysis.py`)
 - `backend/app/uploads.py`, `api/uploads.py` — tus 업로드. `intake.py` — 업로드 → 작업 생성(ffprobe 검증, 경고). `storage.py` — 저장 경로
 - `backend/app/core/events.py`, `api/events.py` — Redis pub/sub → SSE 작업 변경 알림
-- `backend/app/api/` — FastAPI 라우터. `backend/app/worker.py` — Celery 앱(큐 media/align/ai/publish)
-- `backend/app/newsroom/` — 원고 파서(`script_parser.py`), 큐시트 아이템 판별·제목 정리·출처 판별(`rundown.py`), 모델(`models.py`), Provider 인터페이스·정규화(`provider.py`), MARS-L 클라이언트(`marsl.py`), Fake(`fake.py` + 합성 `fixtures/`), 큐시트 매칭(`matching.py`), 조회·저장(`service.py`). 설정 `NEWSROOM_PROVIDER=fake|marsl`
+- `backend/app/api/` — FastAPI 라우터(jobs, uploads, programs, newsroom 미리보기, clips, events, media). `backend/app/worker.py` — Celery 앱(큐 media/align/ai/publish)
+- `backend/app/newsroom/` — 원고 파서(`script_parser.py`), 큐시트 아이템 판별·제목 정리·출처 판별(`rundown.py`), 모델(`models.py`), Provider 인터페이스·정규화(`provider.py`), MARS-L 클라이언트(`marsl.py`), Fake(`fake.py` + 합성 `fixtures/`), 큐시트 매칭(`matching.py`), 조회·저장(`service.py`), 전날 방송분 제외(`dedupe.py`). 설정 `NEWSROOM_PROVIDER=fake|marsl`
 - `backend/app/models/rundown.py` — Rundown, RundownItem (작업당 큐시트 1개)
 - `backend/app/align/` — 정렬(M3): 발음 변환(`korean_text.py`), log-prob(`logprobs.py`), wav2vec2 모델(`acoustic.py`, torch는 선택 의존성 `[model]`), 아이템 순차 정렬·판정(`aligner.py`), 경계 결정(`boundaries.py`), 클립 생성·저장(`service.py`). 상수는 PoC 그대로 — 바꾸면 골든셋을 다시 돌린다
 - `backend/app/models/clip.py` — Clip(DRAFT, 판정 실패면 구간 null), AlignedSentence

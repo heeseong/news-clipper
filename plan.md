@@ -161,7 +161,7 @@ news-clipper/
 
 ---
 
-## M3. 정렬 (파이프라인 5) — 진행 중 (골든셋 회귀 확인 3.8만 남음)
+## M3. 정렬 (파이프라인 5) — 완료 (2026-11-20, `main` 병합: PR #10, #11). 원래 골든셋 4편 재현(3.8 일부)만 녹화본을 받으면 확인
 > PoC 스크립트(`eval/poc/align_poc.py`)를 `backend/app/align/`의 서비스 코드로 옮기는 단계다. 규칙은 spec 5.5와 `eval/poc/RESULTS.md`를 따른다.
 > **상태 (2026-11-20)**: 3.1~3.7 구현. 상수·판단 순서는 PoC 그대로 옮겼다(바꾸려면 골든셋을 다시 돌린다). 실제 모델로 정렬 경로 전체가 돈다(합성 영상으로 확인). 골든셋 녹화본과 정답이 없어 3.8은 남았다.
 
@@ -200,7 +200,43 @@ news-clipper/
 | 4.5 | 썸네일 오버레이 렌더러(Pillow, 템플릿 JSON) → 1280×720 JPG ≤ 2MB |
 | 4.6 | 메타 재생성 API |
 
-**DoD**: 각 리포트 클립에 원고 기반 메타데이터, LLM 대안, 썸네일 후보 6개가 생기고 Job이 REVIEW_READY가 된다. Claude API 키가 없어도 원고 기반 기본값만으로 진행된다.
+**DoD**: 각 클립(자사 리포트·스트레이트, 구간이 있는 것)에 원고 기반 메타데이터, LLM 대안, 썸네일 후보 6개가 생기고 Job이 REVIEW_READY가 된다. Claude API 키가 없어도 원고 기반 기본값만으로 진행된다.
+
+### M4 시작 가이드 (새 세션용, 2026-11-20 작성)
+
+**먼저 읽을 것**: spec 5.7(제목·설명·썸네일), 5.8의 "메타데이터 편집·썸네일"(M5에서 쓸 형태), 7(ClipMetadata, Thumbnail), 9(비용: LLM 토큰 기록), 10(LLM 응답 검증 실패 처리). 이 파일의 "M2에서 정한 것", "M3에서 정한 것"
+
+**지금 상태 (M0~M3 완료)**
+- 파이프라인: `[proxy | analyze | newsroom] → [align] → [metadata | thumbnails] → REVIEW_READY`. `metadata`(큐 `ai`)와 `thumbnails`(큐 `media`)는 처리기가 없어 SKIPPED로 넘어간다. `backend/app/pipeline/handlers.py`에 `@register("metadata")`, `@register("thumbnails")`로 추가하면 바로 실행된다(패턴은 같은 파일의 `align_step`, `newsroom_step`)
+- 업로드 대상(바뀜): **자사 리포트(R)와 스트레이트(S)**. 뉴스투데이는 전날 뉴스데스크 방송분 제외, 헤드라인(`주요뉴스`)·타이틀·다른 방송사 기사 제외. 판별은 `newsroom/rundown.py`(`UPLOAD_TYPES`), `newsroom/dedupe.py`. 결과는 `RundownItem.upload`
+- 클립: `backend/app/models/clip.py`의 `Clip`(DRAFT). 업로드 대상 아이템마다 하나. 정렬 판정에 실패했거나 녹화본에 없으면 `start_sec`/`end_sec`가 null(`needs_manual_range`) → 검수자가 지정(M5). **M4는 구간이 있는 클립만 처리하고, null 클립은 건너뛰되 M5에서 구간을 지정한 뒤 메타·썸네일을 다시 만들 수 있게 한다**(4.6 재생성 API와 같은 함수)
+- `align`을 다시 돌리거나 큐시트를 다시 가져오면 그 작업의 클립을 지우고 새로 만든다(`align/service.store_result`, `newsroom/service.store`). ClipMetadata·Thumbnail은 Clip에 `ondelete=CASCADE`로 매달면 함께 지워진다. M5에서 검수자 수정 보존이 필요해지면 이 규칙을 바꾼다
+- 클립의 원고: `Clip.rundown_item` → `RundownItem.parsed_script`(ParsedScript JSON: `sentences[section, kind, text, speaker]`, `signoff_reporter`, `notes`), `title`(정리된 제목), `title_raw`, `series`, `reporter`(사인오프 기자), `cue_sheet_reporter`(데스크), `planned_duration`. 문장 시각은 `AlignedSentence`(`/api/clips/{id}/sentences`)
+- **원고 메모(썸네일·상단 문구)는 실제 API에서 항상 비어 있다**(`article.memo` = null, spec 3.1). 4.1의 "썸네일 문구(원고 메모)"는 사실상 없음 → 제목에서 만들거나 LLM이 만든다(spec 5.7 표의 마지막 줄)
+- 프로그램 프로필(`models/program.py`)에 M4용 칼럼이 이미 있다: `description_footer`(Text), `default_tags`(JSON list), `thumbnail_template`(JSON dict), `default_channels`. 아직 API로 편집할 수 없다(`schemas/program.py`, `api/programs.py`에 추가). `title_cleanup_rules`, `signoff_pattern`은 쓰이지 않는 칼럼
+- 저장 경로(spec 6.2): `jobs/{id}/clips/{clip_id}/thumb_candidates/*.jpg, thumbnail.jpg` → `backend/app/storage.py`의 `JobFiles`에 추가. 브라우저에 보여 줄 파일은 `PUBLIC_MEDIA`와 `api/media.py`
+- 원본 영상에서 프레임 추출: `media/ffmpeg.py`(`run_ffmpeg`, `probe`), 스프라이트를 원본에서 뽑는 `media/proxy.py`가 참고. 디인터레이스는 `probe.interlaced`일 때 `analysis.DEINTERLACE`. **시각은 파일 시작 기준**(CLAUDE.md 주의점)
+- 화면: 작업 상세(`frontend/src/pages/JobDetailPage.tsx`)의 "클립" 탭이 클립 목록을 보여 준다. M4에서는 여기에 제목·썸네일 후보를 붙여 결과를 눈으로 확인하면 된다(편집 UI는 M5)
+
+**만들 것 (제안)**
+- 모델: `ClipMetadata`(clip_id, title, title_candidates[], description, tags[], hashtags[], thumbnail_text, privacy, publish_at, llm 관련: provider·model·token 사용량·경고), `Thumbnail`(clip_id, frame_sec, path, score, overlay_text, selected). 마이그레이션 0006, `tests/test_migrations.py`가 일치를 확인
+- `LLMProvider` 인터페이스 + `FakeLLMProvider` + Claude 구현(`backend/app/llm/` 등). 설정 `LLM_PROVIDER=fake|claude`, `ANTHROPIC_API_KEY`, 모델 ID. **Claude API를 쓰는 코드를 쓰기 전에 `claude-api` 스킬을 먼저 불러** 현재 모델 ID, structured output(JSON 스키마) 방식, SDK 사용법을 확인한다. 응답이 스키마에 안 맞으면 오류를 넣어 1회 재요청, 그래도 실패하면 원고 기반 기본값만 쓰고 단계는 성공(spec 10). 토큰 사용량 기록(spec 9). LLM에는 원고 텍스트만 보낸다
+- 단신(S)은 리드만 있고 리포트 본문이 없다: 설명·요약 규칙을 리포트와 다르게(예: 단신은 원고 전체가 설명)
+- 썸네일 후보: 클립 구간 안의 장면 전환 직후 프레임(`analysis/scenes.json`) + 균등 샘플 → 점수(선명도 Laplacian variance, 노출, 얼굴, **앵커 샷 감점**) → 상위 6개. 앵커 샷은 리드 구간(첫 문장~리드 끝, `AlignedSentence.section == "lead"`)으로 알 수 있다. 얼굴 검출 라이브러리(OpenCV 등)를 넣을지는 이미지 크기·의존성과 함께 정한다
+- 오버레이 렌더러(Pillow): 1280×720 JPG ≤ 2MB, 템플릿 JSON(문구 위치·폰트·색·로고). **한글 폰트 파일이 필요**하다(Docker 이미지에 넣는 방법을 정할 것: 저장소에 OFL 폰트 포함 또는 빌드 때 다운로드. 세션에서는 deb.debian.org가 막혀 apt로 폰트를 설치할 수 없다)
+- 4.6 재생성 API: `POST /api/clips/{id}/metadata/regenerate`(spec 8)
+- 테스트: Fake LLM과 합성 영상(`tests/fixtures/synthetic.py`)으로. 실제 Claude API·모델은 테스트에서 부르지 않는다
+
+**사용자에게 받을 것 / 정할 것**
+- **Anthropic API 키**: 실제 LLM 호출(4.2 검증)에만 필요. 없어도 Fake로 DoD까지 진행. 받을 때는 채팅이 아니라 `request_credential`(호스트 `api.anthropic.com`, 헤더 `x-api-key`, 접두어 없음)로 받고, 실행할 때 `ANTHROPIC_API_KEY=proxy-injected`처럼 자리표시 값을 넣는다(MARS-L 키와 같은 방식, CLAUDE.md 환경 메모)
+- spec 16-5 **제목 정책**: 원고 제목 그대로 vs 유튜브용으로 다듬은 제목을 기본으로
+- 설명 꼬리말 템플릿, 기본 태그, 썸네일 디자인(로고 파일, 폰트, 색, 문구 위치) — 없으면 임시 기본값으로 만들고 나중에 프로필에서 바꾼다
+- 실제 클립으로 썸네일을 확인하려면 녹화본 1편이 필요하다(`eval/data/`는 세션이 바뀌면 사라진다). 그때 정렬까지 돌리려면 torch와 모델이 필요하다: `cd backend && uv pip install torch --index-url https://download.pytorch.org/whl/cpu && uv pip install -e ".[model]"`(환경 설정 스크립트는 `.[dev]`만 설치), 모델은 첫 실행 때 받는다(1.2GB, `HF_HUB_DISABLE_XET=1`). 큐시트는 MARS-L API로 바로 받을 수 있다(`eval/tools/score_alignment.py`가 녹화본·`items.json`으로 신호·정렬까지 만든다)
+
+**기존 남은 일 (M4와 별개)**
+- M3.8: 원래 골든셋 4편(11-02, 11-04, 11-05, 11-11) 재현. 녹화본과 정답이 필요하다(새 골든셋 11-16, 11-19는 서비스 코드로 블라인드 10/10씩)
+- 관찰만 한 것: 녹화본 끝의 관계없는 오디오 쪽으로 마지막 단신이 몰려 정렬됨(창 끝 쏠림), 소수점 `5.8`을 [오쩜팔]로 읽음(RESULTS.md)
+- 큐시트 자동 재조회(주기적)는 없음. 필요하면 Celery beat
 
 ---
 
