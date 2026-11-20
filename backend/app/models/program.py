@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import time
 from typing import Any
 
-from sqlalchemy import JSON, String, Text, Time
+from sqlalchemy import JSON, String, Text, Time, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
@@ -27,6 +27,9 @@ class ProgramProfile(TimestampMixin, Base):
     signoff_pattern: Mapped[str | None] = mapped_column(String(255))
     title_cleanup_rules: Mapped[list[Any]] = mapped_column(JSON, default=list)
     # Stations whose reports are not uploaded (e.g. ["광주", "여수"]).
+    # Words read differently from their spelling, for alignment (e.g. {"KIA": "기아"}); added to
+    # the built-in dictionary in app/align/korean_text.py.
+    pronunciations: Mapped[dict[str, str]] = mapped_column(JSON, default=dict, server_default=text("'{}'"))
     excluded_sources: Mapped[list[str]] = mapped_column(JSON, default=lambda: list(DEFAULT_EXCLUDED_SOURCES))
     description_footer: Mapped[str | None] = mapped_column(Text)
     default_tags: Mapped[list[str]] = mapped_column(JSON, default=list)

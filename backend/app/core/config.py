@@ -50,6 +50,11 @@ class Settings(BaseSettings):
     fake_newsroom_dir: Path | None = None
     fake_newsroom_any_date: bool = True
 
+    # Alignment (spec 5.5). The model runs locally on CPU (needs the `model` extra).
+    align_model: str = "kresnik/wav2vec2-large-xlsr-korean"
+    align_threads: int = 4
+    align_chunk_seconds: float = 20.0
+
     # Run Celery tasks in-process (tests, or running the API without workers).
     celery_always_eager: bool = False
 

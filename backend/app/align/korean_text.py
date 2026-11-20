@@ -107,9 +107,10 @@ def spell_latin(text: str) -> str:
     return re.sub(r"[A-Za-z]+", lambda m: "".join(_LETTERS[c] for c in m.group(0).upper()), text)
 
 
-def to_spoken_hangul(text: str) -> str:
-    """Hangul syllables and single spaces only."""
-    for word, reading in PRONUNCIATIONS.items():
+def to_spoken_hangul(text: str, extra_pronunciations: dict[str, str] | None = None) -> str:
+    """Hangul syllables and single spaces only. `extra_pronunciations` (program profile) are
+    applied before the built-in dictionary."""
+    for word, reading in {**(extra_pronunciations or {}), **PRONUNCIATIONS}.items():
         text = re.sub(rf"(?<![A-Za-z]){word}(?![A-Za-z])", reading, text)
     for sym, word in _SYMBOLS.items():
         text = text.replace(sym, word)

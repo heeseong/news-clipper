@@ -192,7 +192,7 @@ def fake(app_env, monkeypatch):
     """Fake newsroom; the media steps do nothing so jobs need no video."""
     provider = FakeNewsroomProvider.from_dir()
     factory.set_provider(provider)
-    for step in ("proxy", "analyze"):
+    for step in ("proxy", "analyze", "align"):
         monkeypatch.setitem(step_registry._HANDLERS, step, lambda ctx: None)
     yield provider
     factory.set_provider(None)

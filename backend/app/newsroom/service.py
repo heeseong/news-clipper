@@ -12,10 +12,10 @@ from dataclasses import dataclass, field
 from datetime import date, time
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from app.models import Job, ProgramProfile, Rundown, RundownItem
+from app.models import AlignedSentence, Clip, Job, ProgramProfile, Rundown, RundownItem
 from app.models.base import utcnow
 from app.storage import JobFiles
 
@@ -214,6 +214,11 @@ def store(session: Session, job: Job, fetched: FetchedRundown) -> Rundown:
     rundown.match_reason = fetched.match.reason[:255]
     rundown.raw = {"rundown": s.raw, "items": fetched.raw_items}
     rundown.warnings = list(fetched.warnings)
+    if rundown.items:
+        # Results that hang off the old items (alignment, clips) are redone by the align step.
+        old_ids = [i.id for i in rundown.items]
+        session.execute(delete(Clip).where(Clip.rundown_item_id.in_(old_ids)))
+        session.execute(delete(AlignedSentence).where(AlignedSentence.rundown_item_id.in_(old_ids)))
     rundown.items.clear()
     session.flush()  # delete old items before inserting rows with the same item_no
     rundown.items.extend(_db_item(i) for i in fetched.items)

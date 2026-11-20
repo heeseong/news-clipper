@@ -8,7 +8,9 @@
 # web UI stays responsive on a shared server. Tune *_CONCURRENCY in .env.
 
 x-backend: &backend
-  build: ./backend
+  build:
+    context: ./backend
+    target: app
   image: news-clipper-backend
   restart: unless-stopped
   # Optional settings from .env (PROXY_PRESET, SCENE_THRESHOLD, ...); `environment` below wins.
@@ -85,9 +87,18 @@ services:
         condition: service_completed_successfully
 
   # Script-audio forced alignment (keeps the model in memory; one at a time)
+  # Image with PyTorch (CPU); the model (~1.2 GB) is downloaded into the `models` volume on the
+  # first job. The worker keeps it in memory (~2-3 GB RAM).
   worker-align:
     <<: *backend
+    build:
+      context: ./backend
+      target: align
+    image: news-clipper-align
     command: ["celery", "-A", "app.worker", "worker", "-Q", "align", "-c", "${ALIGN_CONCURRENCY:-1}", "-n", "align@%h"]
+    volumes:
+      - storage:/data/storage
+      - models:/data/models
     depends_on: *worker-deps
 
   # Newsroom (MARS-L) and Claude API calls, plus pipeline orchestration callbacks
@@ -116,3 +127,4 @@ volumes:
   pgdata:
   redisdata:
   storage:
+  models:
