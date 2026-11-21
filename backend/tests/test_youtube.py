@@ -244,3 +244,28 @@ def test_device_flow_and_refresh_send_the_secret_as_basic_auth():
     assert all("client_secret" not in form for _, form, _ in token_calls)
     url = oauth.authorization_url("https://clipper.test/api/channels/oauth/callback", "st8")
     assert "access_type=offline" in url and "state=st8" in url and "prompt=consent" in url and "auth%2Fyoutube" in url
+
+
+def test_update_keeps_the_settings_it_does_not_change():
+    """videos.update replaces whole parts: embeddable etc. must be sent back as they are."""
+    sent = {}
+    video = {"id": "vid123", "snippet": {"title": "old", "description": "d", "categoryId": "25", "channelId": "UC",
+                                         "thumbnails": {}, "publishedAt": "2026-11-21T00:00:00Z"},
+             "status": {"uploadStatus": "processed", "privacyStatus": "private", "publishAt": "2030-01-01T09:00:00Z",
+                        "embeddable": True, "publicStatsViewable": True, "license": "youtube", "madeForKids": False}}  # fmt: skip
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(200, json={"items": [video]})
+        sent.update(json.loads(request.content))
+        return httpx.Response(200, json=sent)
+
+    pub = YouTubePublisher(Tokens(), api_url=API, transport=httpx.MockTransport(handler))
+    pub.update("vid123", PublishMeta(title="new", description="nd", privacy="public"))  # no schedule any more
+    assert sent["snippet"]["title"] == "new" and sent["snippet"]["categoryId"] == "25"
+    assert "channelId" not in sent["snippet"] and "thumbnails" not in sent["snippet"]
+    st = sent["status"]
+    assert st["embeddable"] is True and st["publicStatsViewable"] is True and st["license"] == "youtube"
+    assert st["privacyStatus"] == "public" and "publishAt" not in st and "uploadStatus" not in st
+    pub.update("vid123", META)  # scheduled again
+    assert sent["status"]["publishAt"] == "2030-01-01T18:00:00Z" and sent["status"]["privacyStatus"] == "private"

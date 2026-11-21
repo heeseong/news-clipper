@@ -277,8 +277,27 @@ class YouTubePublisher:
         return status_from_video(items[0] if items else None)
 
     def update(self, remote_id: str, meta: PublishMeta) -> None:
-        r = self._request("PUT", f"{self.api}/youtube/v3/videos", params={"part": "snippet,status"},
-                          json=video_body(meta, remote_id))  # fmt: skip
+        """videos.update replaces every property of the parts it is given: a status without
+        `embeddable` turned embedding off (seen 2026-11-21). So read the video first and change
+        only our fields; settings made in YouTube Studio stay."""
+        r = self._request("GET", f"{self.api}/youtube/v3/videos", params={"part": "snippet,status", "id": remote_id})
+        if r.status_code != 200:
+            raise error_from_response(r, "메타데이터 수정(조회)")
+        items = r.json().get("items") or []
+        if not items:
+            raise PublishError("YouTube에서 영상을 찾을 수 없습니다", "remote", reason="videoNotFound")
+        current = items[0]
+        ours = video_body(meta, remote_id)
+        snippet = {**current.get("snippet", {}), **ours["snippet"]}
+        for read_only in ("publishedAt", "channelId", "channelTitle", "thumbnails", "localized", "liveBroadcastContent"):
+            snippet.pop(read_only, None)
+        status = {**current.get("status", {}), **ours["status"]}
+        for read_only in ("uploadStatus", "failureReason", "rejectionReason", "madeForKids"):
+            status.pop(read_only, None)
+        if "publishAt" not in ours["status"]:
+            status.pop("publishAt", None)  # not scheduled (any more)
+        body = {"id": remote_id, "snippet": snippet, "status": status}
+        r = self._request("PUT", f"{self.api}/youtube/v3/videos", params={"part": "snippet,status"}, json=body)
         if r.status_code != 200:
             raise error_from_response(r, "메타데이터 수정")
 

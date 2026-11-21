@@ -402,9 +402,9 @@ class Publisher(Protocol):
 **기타 SNS (v2)**: Meta(Facebook/Instagram Reels), TikTok, 카카오(대상 확정 후). 예약 기능이 없는 플랫폼은 자체 스케줄러로 예약 시각에 업로드한다.
 
 ### 5.10 [10] 업로드 상태 확인 및 재시도
-> M7에서 기본 동작(아래 표의 재시도·미루기, 1분 sweep의 상태 확인, 수동 재시도·취소, 업로드 대시보드)을 만들었다. 점진적 폴링, 원격 메타 수정, 알림, 장애 주입 테스트는 M8.
+> M7(재시도·미루기, 수동 재시도·취소, 대시보드)과 M8(점진적 상태 확인, 썸네일 자동 재시도, 업로드 뒤 수정 자동 반영, 장애 시나리오 테스트)에서 구현했다.
 
-- 업로드 뒤 상태 확인(`videos.list?part=status,processingDetails`). 지금은 Celery beat 1분 sweep이 고정 간격(처리 중 2분, 예약 시각 직후와 그 뒤 5분, 처리 전 예약 영상 10분)으로 확인한다 → M8: 1분 → 최대 10분 간격으로 점진 증가, 게시 뒤 거부(rejection)도 확인
+- 업로드 뒤 상태 확인(`videos.list?part=status,processingDetails`): 1분 sweep이 작업별 다음 확인 시각을 본다. 처리 중에는 1·2·4·8분 뒤, 그다음 10분마다. 처리된 예약 영상은 예약 시각 1분 뒤. 게시 뒤에도 10분·1시간·6시간·24시간에 다시 확인해 거부·삭제를 잡는다
 - 상태 대응: `processed` + 목표 공개 범위 → `PUBLISHED`, `publishAt`이 남아 있으면 `SCHEDULED`, `uploaded`(처리 중) → `PROCESSING`, `failed`/`rejected`/영상 없음 → `UPLOAD_FAILED`(사유 표시). 예약 시각이 15분 지나도 비공개면 실패로 알린다(미인증 API 프로젝트는 비공개로 고정될 수 있음)
 - 재시도 정책
   | 오류 | 처리 |
@@ -415,9 +415,9 @@ class Publisher(Protocol):
   | 400 uploadLimitExceeded | 채널 하루 업로드 개수 한도: 그 업로드만 초기화 뒤로 재예약(프로젝트 할당량은 그대로) |
   | 400 메타데이터 오류, 403 forbidden | 재시도 안 함 → UPLOAD_FAILED, 수정 후 수동 재시도 |
   | 플랫폼 처리 실패·거부 | UPLOAD_FAILED + 사유 표시. 다시 시도하면 새 영상으로 올림 |
-  | 썸네일만 실패 | 영상은 유지하고 썸네일만 재시도(지금은 수동 버튼) |
+  | 썸네일만 실패 | 영상은 유지하고 썸네일만 재시도(일시 오류는 2·10·30분 뒤 자동, 그 밖에는 수동 버튼) |
 - 수동 조작: 재시도(횟수 처음부터), 취소(올라간 영상은 삭제), 상태 확인
-- **업로드 뒤 메타데이터를 고치면 YouTube에 자동 반영**(`videos.update`, 2026-11-21 결정, M8에서 구현). 반영 실패는 경고로 남기고 다시 시도할 수 있다
+- **업로드 뒤 메타데이터를 고치면 YouTube에 자동 반영**(2026-11-21 결정): 제목·설명·태그·해시태그·공개 범위·예약·썸네일. `videos.update`는 영상을 먼저 읽고 바꾸는 항목만 합쳐 보낸다(보낸 part의 나머지 속성이 초기화되므로). 채널·구간은 업로드를 취소해야 바꾸고, 게시된 영상의 예약 시각은 바꿀 수 없다. 반영 실패는 표시하고 일시 오류는 자동, 그 밖에는 "다시 반영"
 - 알림: **외부 알림(Slack·메일)은 쓰지 않는다**(2026-11-21 결정). 문제는 게시 현황·편집기 화면의 상태와 사유로 보여 준다
 - 업로드 대시보드(`/publish`): 채널별 오늘 예약·게시·대기·실패 건수, 할당량 사용량과 초기화 시각
 
@@ -489,7 +489,7 @@ storage/jobs/{job_id}/
 | Clip | id, job_id, rundown_item_id, start_sec, end_sec, start_snap, end_snap, confidence, flags[], status, render_path, locked_by, locked_at |
 | ClipMetadata | clip_id, title, title_candidates[], description, tags[], hashtags[], thumbnail_text, privacy, publish_at, channel_ids[] |
 | Thumbnail | id, clip_id, frame_sec, path, score, overlay_text, selected |
-| PublishTask | id, clip_id, channel_id, status(QUEUED/UPLOADING/UPLOADED/PROCESSING/SCHEDULED/PUBLISHED/FAILED/CANCELLED), privacy, publish_at(업로드 때 값), remote_id, remote_url, attempts, next_retry_at, last_error, error_kind, resumable_uri, file_size, bytes_sent, thumbnail_status, remote_status, checked_at, uploaded_at, published_at |
+| PublishTask | id, clip_id, channel_id, status(QUEUED/UPLOADING/UPLOADED/PROCESSING/SCHEDULED/PUBLISHED/FAILED/CANCELLED), privacy, publish_at(반영된 값), remote_id, remote_url, attempts, next_retry_at, last_error, error_kind, resumable_uri, file_size, bytes_sent, thumbnail_status·attempts·next_at, remote_status, checked_at, next_check_at, check_count, sync_status·version·error·next_at(업로드 뒤 수정 반영), uploaded_at, published_at |
 | AuditLog | id, user_id, entity, entity_id, action, diff(JSONB), created_at |
 
 - 시간은 원본 기준 초(소수점 3자리)로 저장하고, 화면에는 타임코드(HH:MM:SS:FF)로 표시한다.
