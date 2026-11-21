@@ -4,7 +4,18 @@ from datetime import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import Base
@@ -14,6 +25,7 @@ from .base import TimestampMixin, str_enum
 if TYPE_CHECKING:
     from .metadata import ClipMetadata, Thumbnail
     from .rundown import RundownItem
+    from .user import User
 
 
 class ClipStatus(StrEnum):
@@ -59,8 +71,17 @@ class Clip(TimestampMixin, Base):
     render_path: Mapped[str | None] = mapped_column(String(1024))
     locked_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Review (M5). A reviewed clip (edited, approved or rejected) is not thrown away by an align
+    # re-run unless the user confirms (app/review/service.py).
+    edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    edited_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    warnings_acknowledged: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # approved / rejected
+    reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    reject_reason: Mapped[str | None] = mapped_column(String(255))
 
     rundown_item: Mapped[RundownItem] = relationship()
+    locker: Mapped[User | None] = relationship(foreign_keys=[locked_by])
     # Rows are removed by the database (ON DELETE CASCADE) when clips are deleted in bulk.
     metadata_: Mapped[ClipMetadata | None] = relationship(passive_deletes=True)
     thumbnails: Mapped[list[Thumbnail]] = relationship(

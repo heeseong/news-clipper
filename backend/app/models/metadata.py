@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
@@ -31,7 +31,9 @@ class ClipMetadata(TimestampMixin, Base):
     thumbnail_text: Mapped[str] = mapped_column(String(255), default="")  # may have a line break
     thumbnail_text_candidates: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     privacy: Mapped[str] = mapped_column(String(16), default="private")  # private | unlisted | public
+    # Scheduled publication (the video stays private until then, then gets `privacy`).
     publish_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    channel_ids: Mapped[list[int]] = mapped_column(JSON, default=list, server_default=text("'[]'"))
     # LLM run (spec 9: token usage per job). llm_status: ok | failed | off
     llm_status: Mapped[str] = mapped_column(String(16), default="off")
     llm_provider: Mapped[str | None] = mapped_column(String(32))

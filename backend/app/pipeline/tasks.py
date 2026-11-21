@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Callable
+from pathlib import Path
 
 from celery import chord
 
@@ -161,3 +162,41 @@ def regenerate_clip_metadata(clip_id: int) -> str:
         thumbnails.render_selected(session, clip_id)
     publish_job_changed(job_id)
     return status
+
+
+@celery_app.task(name="clips.prepare_after_range")
+def prepare_clip_after_range(clip_id: int) -> str:
+    """After the reviewer sets or changes a clip's range (M5): thumbnail candidates from the new
+    range, and metadata when the clip has none yet (a clip the alignment could not place)."""
+    from app.align import service as aligning
+    from app.core.config import get_settings as settings_of
+    from app.media.ffmpeg import ProbeResult
+    from app.metadata import service as metadata
+    from app.metadata.factory import get_llm_provider
+    from app.models import Clip, ClipMetadata
+    from app.storage import JobFiles
+    from app.thumbnails import service as thumbnails
+
+    with session_scope() as session:
+        clip = session.get(Clip, clip_id)
+        if clip is None or clip.needs_manual_range:
+            return "missing"
+        job = session.get(Job, clip.job_id)
+        job_id, source = job.id, job.source_path
+        if session.get(ClipMetadata, clip_id) is None:
+            metadata.generate_for_clip(session, clip, get_llm_provider())
+        (r,) = thumbnails.clip_ranges(session, job_id, [clip_id])
+    files = JobFiles(job_id)
+    s = settings_of()
+    if source and files.probe.exists():
+        probe = ProbeResult.model_validate_json(files.probe.read_text())
+        cuts, _ = aligning.load_signals(files.scenes, files.silences)
+        rows = thumbnails.make_candidates(
+            job_id, r, Path(source), probe, cuts, count=s.thumbnail_candidates, samples=s.thumbnail_samples
+        )
+        with session_scope() as session:
+            thumbnails.store(session, clip_id, rows)
+    with session_scope() as session:
+        thumbnails.render_selected(session, clip_id)
+    publish_job_changed(job_id)
+    return "ok"

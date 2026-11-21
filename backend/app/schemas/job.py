@@ -21,6 +21,15 @@ class JobStepOut(BaseModel):
     error: str | None
 
 
+class ClipCounts(BaseModel):
+    """Spec 5.8 job list: clips approved / found in the recording / in the cue sheet."""
+
+    total: int = 0  # upload targets in the cue sheet (one clip each)
+    ranged: int = 0  # with a range (found automatically or set by a reviewer)
+    approved: int = 0
+    rejected: int = 0
+
+
 class JobOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -40,6 +49,7 @@ class JobOut(BaseModel):
     warnings: list[str]
     is_dummy: bool
     cue_sheet_id: int | None = None  # picked by the user (upload form or refresh)
+    clip_counts: ClipCounts = ClipCounts()
     created_at: datetime
     updated_at: datetime
 

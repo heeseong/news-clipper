@@ -3,20 +3,22 @@ from __future__ import annotations
 import json
 
 from fastapi import APIRouter, HTTPException, Query, status
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy import case, func, select
+from sqlalchemy.orm import Session, object_session
 
 from app.api.deps import AppSettings, DbSession
 from app.core.events import publish_job_changed
 from app.intake import IntakeError, create_job_from_upload
-from app.models import Job, JobStatus, Rundown
+from app.models import Clip, ClipStatus, Job, JobStatus, Rundown
 from app.newsroom import service as newsroom_service
 from app.pipeline import tasks
 from app.pipeline.definition import PIPELINE, STEPS
 from app.pipeline.orchestrator import TransitionError, create_steps
+from app.review import service as review_service
 from app.schemas.job import (
     AnalysisOut,
     ArtifactsOut,
+    ClipCounts,
     DummyJobIn,
     JobCreateIn,
     JobDetailOut,
@@ -32,9 +34,31 @@ from app.storage import JobFiles
 router = APIRouter(prefix="/api", tags=["jobs"])
 
 
-def _job_out(job: Job, model: type[JobOut] = JobOut) -> JobOut:
+def clip_counts(db: Session, job_ids: list[int]) -> dict[int, ClipCounts]:
+    rows = db.execute(
+        select(
+            Clip.job_id,
+            func.count(),
+            func.count(Clip.start_sec),
+            func.sum(case((Clip.status == ClipStatus.APPROVED, 1), else_=0)),
+            func.sum(case((Clip.status == ClipStatus.REJECTED, 1), else_=0)),
+        )
+        .where(Clip.job_id.in_(job_ids))
+        .group_by(Clip.job_id)
+    ).all()
+    return {
+        job_id: ClipCounts(total=total, ranged=ranged, approved=approved or 0, rejected=rejected or 0)
+        for job_id, total, ranged, approved, rejected in rows
+    }
+
+
+def _job_out(job: Job, model: type[JobOut] = JobOut, counts: ClipCounts | None = None) -> JobOut:
     out = model.model_validate(job)
     out.program_name = job.program.name if job.program else None
+    if counts is None:
+        session = object_session(job)
+        counts = clip_counts(session, [job.id]).get(job.id) if session else None
+    out.clip_counts = counts or ClipCounts()
     if isinstance(out, JobDetailOut):
         files = JobFiles(job.id)
         out.artifacts = ArtifactsOut(
@@ -68,7 +92,8 @@ def list_jobs(
 ) -> JobListOut:
     total = db.scalar(select(func.count()).select_from(Job)) or 0
     jobs = db.scalars(select(Job).order_by(Job.id.desc()).limit(limit).offset(offset)).unique().all()
-    return JobListOut(items=[_job_out(j) for j in jobs], total=total)
+    counts = clip_counts(db, [j.id for j in jobs])
+    return JobListOut(items=[_job_out(j, counts=counts.get(j.id, ClipCounts())) for j in jobs], total=total)
 
 
 @router.get("/jobs/{job_id}", response_model=JobDetailOut)
@@ -136,9 +161,26 @@ def create_dummy_job(
     return _job_out(_get_job(db, job.id), JobDetailOut)
 
 
+def _guard_reviewed(db: Session, job_id: int, force: bool) -> None:
+    """Re-running a step remakes the clips (align) or their metadata and thumbnails: ask first
+    when a reviewer has already worked on some (M5)."""
+    if force:
+        return
+    reviewed = review_service.reviewed_clips(db, job_id)
+    if reviewed:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            {
+                "message": f"검수한 클립 {len(reviewed)}개의 수정·승인 내용이 사라집니다. 그래도 진행하려면 force=true",
+                "reviewed_clips": [c.id for c in reviewed],
+            },
+        )
+
+
 @router.post("/jobs/{job_id}/steps/{step}/retry", response_model=JobDetailOut)
-def retry_step(job_id: int, step: str, db: DbSession) -> JobOut:
+def retry_step(job_id: int, step: str, db: DbSession, force: bool = False) -> JobOut:
     _get_job(db, job_id)
+    _guard_reviewed(db, job_id, force)
     try:
         tasks.retry_step(job_id, step)
     except LookupError as e:
@@ -170,12 +212,13 @@ def get_rundown(job_id: int, db: DbSession) -> RundownOut:
 
 
 @router.post("/jobs/{job_id}/rundown/refresh", response_model=JobDetailOut)
-def refresh_rundown(job_id: int, body: RundownRefreshIn, db: DbSession) -> JobOut:
+def refresh_rundown(job_id: int, body: RundownRefreshIn, db: DbSession, force: bool = False) -> JobOut:
     """Look the cue sheet up again (optionally a specific one) and redo the steps after it.
 
     Used when the job waits for its cue sheet (WAITING_RUNDOWN) or the cue sheet was edited.
     """
     _get_job(db, job_id)
+    _guard_reviewed(db, job_id, force)
     params = {"cue_sheet_id": body.cue_sheet_id} if body.cue_sheet_id is not None else None
     try:
         tasks.retry_step(job_id, "newsroom", params)
