@@ -400,3 +400,21 @@ def test_schedule_in_kst_is_stored_as_utc(reviewed, client):
     with session_scope() as s:
         at = s.get(ClipMetadata, ids[1]).publish_at
     assert at.replace(tzinfo=at.tzinfo or UTC) == datetime(2030, 1, 1, 0, 0, tzinfo=UTC)
+
+
+def test_channel_upload_limit_does_not_use_up_the_project_quota(reviewed, client, channel):
+    """400 uploadLimitExceeded is the channel's daily upload count (2026-11-21, 11th upload)."""
+    _, _, ids = reviewed
+    with session_scope() as db:
+        ch = Channel(platform="youtube", name="유튜브", remote_channel_id="UClimit", status=ChannelStatus.ACTIVE)
+        db.add(ch)
+        db.flush()
+        chan = {"id": ch.id}
+    factory.set_publisher(lambda c: FakePublisher(fail={"upload": [
+        PublishError("YouTube 400 uploadLimitExceeded", "quota", reason="uploadLimitExceeded")]}))  # fmt: skip
+    schedule(client, ids[1], chan)
+    assert client.post(f"/api/clips/{ids[1]}/approve", headers=A).json()["status"] == "UPLOADING"
+    t = task_of(ids[1])
+    assert t.status == PublishStatus.QUEUED and t.error_kind == "quota" and "업로드 개수 한도" in t.last_error
+    with session_scope() as db:
+        assert quota.used(db, "youtube") == 1650  # only our reservation, not the whole quota

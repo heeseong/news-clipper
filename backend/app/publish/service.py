@@ -290,9 +290,15 @@ def _upload_failed(task_id: int, e: PublishError, now: datetime) -> str:
         if e.reason == "sessionExpired":
             t.resumable_uri = None
         if e.kind == "quota":
-            quota.exhaust(s, ch.platform, now)
             t.attempts = max(0, t.attempts - 1)
-            _defer_for_quota(t, now, f"API 할당량 초과({e.reason}): {quota.kst(quota.next_reset(now) + QUOTA_GRACE)}(한국 시간)에 다시 올립니다")
+            when = quota.kst(quota.next_reset(now) + QUOTA_GRACE)
+            if e.reason == "uploadLimitExceeded":
+                # The channel's own daily upload count (seen at the 11th upload of a day on the
+                # test channel), not the project's units: other channels can still upload.
+                _defer_for_quota(t, now, f"채널의 하루 업로드 개수 한도에 걸렸습니다(uploadLimitExceeded): {when}(한국 시간)에 다시 올립니다")
+            else:
+                quota.exhaust(s, ch.platform, now)
+                _defer_for_quota(t, now, f"API 할당량 초과({e.reason}): {when}(한국 시간)에 다시 올립니다")
             outcome = "deferred"
         elif e.retryable and t.attempts < s_.publish_max_attempts:
             minutes = BACKOFF_MINUTES[min(t.attempts, len(BACKOFF_MINUTES)) - 1]

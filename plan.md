@@ -378,6 +378,14 @@ news-clipper/
 - 합성 녹화본(1280×720, 20초) 클립 8초: 업로드(resumable) → `privacyStatus=private` + `publishAt` 예약 → 맞춤 썸네일 반영(maxres) → 제목·설명(해시태그 포함)·태그·`categoryId=25`·`defaultLanguage=ko` 반영을 `videos.list`로 확인
 - 예약 시각(04:54 UTC) 뒤 첫 상태 확인(04:55)에서 `processed` + `public` → 작업·클립 `PUBLISHED`. **DoD 충족**. 이 프로젝트에서는 미인증 프로젝트의 비공개 고정이 일어나지 않았다(운영 전 감사·할당량 증설 신청은 여전히 필요)
 
+### 실제 방송으로 업로드 한도 확인 (2026-11-21, 11-16 뉴스데스크 320×240 축소본)
+- 실제 MARS-L 큐시트 + 실제 정렬 모델(CPU, 322초): 업로드 대상 25건 중 11건 구간 검출(리포트 5, 단신 6). 녹화본이 20분에서 끝나 뒤쪽 단신 13건은 미검출, 2건은 신뢰도 낮음(수동 지정 대상)
+- 11건 일괄 승인 → 렌더 → 비공개 업로드. 앱의 할당량 계산(1,650 units/건)을 끄고 Google이 막을 때까지 시도
+- **결과: 하루 10번째 업로드까지 성공(앞선 테스트 1건 포함), 11번째에서 `400 uploadLimitExceeded`**("The user has exceeded the number of videos they may upload"). 이것은 프로젝트 units 할당량(`403 quotaExceeded`)이 아니라 **채널의 하루 업로드 개수 한도**다. units 기준(1,600/건)이면 6번째에서 막혔어야 하므로 videos.insert의 실제 비용은 문서의 1,600보다 작다 → Google Cloud 콘솔의 할당량 페이지에서 실제 사용량을 확인하고 `YOUTUBE_QUOTA_INSERT`를 맞출 것
+- 9건 모두 처리 완료(processed), 썸네일 9/9 반영. 막힌 2건은 할당량 대기(태평양 시간 자정 + 5분)로 미뤄짐
+- 고친 것: `uploadLimitExceeded`는 채널 한도이므로 프로젝트 할당량 카운터를 소진 처리하지 않는다(다른 채널은 계속 올릴 수 있게)
+- 운영 영향: 채널당 하루 업로드 개수에 한도가 있다(이 채널은 10건). 뉴스데스크 + 뉴스투데이 리포트·단신을 한 채널에 올리면 넘을 수 있다 → 채널 인증 상태·한도 확인, 필요하면 채널 분리 검토
+
 ### 실제 채널 확인 절차 (DoD, 사용자 준비물 필요)
 1. Google Cloud 프로젝트에서 **YouTube Data API v3 사용 설정**, OAuth 동의 화면(외부, 테스트 모드면 채널 소유 Google 계정을 테스트 사용자로 추가), OAuth 클라이언트 **"TV 및 입력 제한 기기"** 생성 → 클라이언트 ID·시크릿
 2. 서버 `.env`: `PUBLISHER=youtube`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `TOKEN_ENCRYPTION_KEY`. 클라우드 세션에서는 시크릿을 `request_credential`(호스트 `oauth2.googleapis.com`, 사용자 이름 = 클라이언트 ID, 비밀번호 = 시크릿, Basic)로 받고 `GOOGLE_CLIENT_SECRET=proxy-injected`. 네트워크에 `oauth2.googleapis.com`, `www.googleapis.com` 허용 필요
