@@ -5,7 +5,7 @@
 
 ## 먼저 읽을 것
 - `spec.md` — 기능 명세(v1.0). 정렬·경계 규칙의 근거는 5.5절
-- `plan.md` — 마일스톤과 진행 상태. M0~M6 구현(로그인 보류, M3는 원래 골든셋 4편 재현, M4는 실제 Claude 호출·HD 녹화본 확인이 남음, M5 채널 선택은 M7 뒤, M6는 HD 원본 렌더 시간 확인이 남음). 다음 작업은 **M7(YouTube 업로드·예약 발행)**. 각 마일스톤의 "정한 것"에 규칙이 있다
+- `plan.md` — 마일스톤과 진행 상태. M0~M6 구현(로그인 보류, M3는 원래 골든셋 4편 재현, M4는 실제 Claude 호출·HD 녹화본 확인이 남음, M5 채널 선택은 M7 뒤, M6는 HD 원본 렌더 시간 확인이 남음). 다음 작업은 **M7(YouTube 업로드·예약 발행)**: M7 절의 **"M7 시작 가이드"**에 지금 상태, 연결점, 만들 것, 사용자에게 받을 것이 정리돼 있다. 각 마일스톤의 "정한 것"에 규칙이 있다
 - `eval/poc/RESULTS.md` — 정렬 PoC 결과와 방송별 실패 사례
 
 ## 핵심 결정 (바꾸기 전에 사용자와 확인)
@@ -18,6 +18,7 @@
 - 외부 연동(MARS-L, Claude, YouTube)은 인터페이스 + Fake 구현을 먼저 만든다
 - 메타데이터 기본값은 원고에서, LLM(Claude) 결과는 후보로만. 유튜브 제목은 `원고 제목[목포MBC 뉴스데스크]`(2026-11-21, 프로필 `title_template`). LLM 실패는 경고만 남기고 단계는 성공. LLM에는 원고 텍스트만 보낸다
 - 썸네일: 리포트는 대표 프레임 + 템플릿 이미지(나중에 교체) + 제목 두 줄, 단신은 앵커 샷 뒤 하단 제목 자막이 처음 뜬 화면 그대로(2026-11-20)
+- 검수: 승인 → 원본 화질 자동 렌더(페이드 없음, 첫 프레임 = 검수에서 지정한 프레임). 승인 뒤 구간·내용을 고치려면 "다시 열기"(렌더 삭제). 발행 설정(공개 범위·예약·채널)은 승인 뒤에도 변경 가능
 
 ## 저장소 구조 (현재)
 - `backend/app/core/` — 설정(`config.py`, 환경변수), JSON 로깅, DB 세션
@@ -26,7 +27,7 @@
 - `backend/app/media/` — ffprobe·ffmpeg 래퍼(`ffmpeg.py`), 프록시·스프라이트·파형(`proxy.py`), 정렬용 오디오·장면 전환·무음(`analysis.py`)
 - `backend/app/uploads.py`, `api/uploads.py` — tus 업로드. `intake.py` — 업로드 → 작업 생성(ffprobe 검증, 경고). `storage.py` — 저장 경로
 - `backend/app/core/events.py`, `api/events.py` — Redis pub/sub → SSE 작업 변경 알림
-- `backend/app/api/` — FastAPI 라우터(jobs, uploads, programs, newsroom 미리보기, clips, events, media). `backend/app/worker.py` — Celery 앱(큐 media/align/ai/publish)
+- `backend/app/api/` — FastAPI 라우터(jobs, uploads, programs(썸네일 템플릿 업로드 포함), newsroom 미리보기, clips, review, events, media). `backend/app/worker.py` — Celery 앱(큐 media/align/ai/publish)
 - `backend/app/newsroom/` — 원고 파서(`script_parser.py`), 큐시트 아이템 판별·제목 정리·출처 판별(`rundown.py`), 모델(`models.py`), Provider 인터페이스·정규화(`provider.py`), MARS-L 클라이언트(`marsl.py`), Fake(`fake.py` + 합성 `fixtures/`), 큐시트 매칭(`matching.py`), 조회·저장(`service.py`), 전날 방송분 제외(`dedupe.py`). 설정 `NEWSROOM_PROVIDER=fake|marsl`
 - `backend/app/models/rundown.py` — Rundown, RundownItem (작업당 큐시트 1개)
 - `backend/app/align/` — 정렬(M3): 발음 변환(`korean_text.py`), log-prob(`logprobs.py`), wav2vec2 모델(`acoustic.py`, torch는 선택 의존성 `[model]`), 아이템 순차 정렬·판정(`aligner.py`), 경계 결정(`boundaries.py`), 클립 생성·저장(`service.py`). 상수는 PoC 그대로 — 바꾸면 골든셋을 다시 돌린다

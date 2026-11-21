@@ -357,6 +357,38 @@ news-clipper/
 
 **DoD**: 테스트 채널에 비공개 예약 업로드가 성공하고, 예약 시각에 공개되며 썸네일과 메타데이터가 반영된다.
 
+### M7 시작 가이드 (새 세션용, 2026-11-21 작성)
+
+**먼저 읽을 것**: spec 4.2(클립 상태: `RENDERED → UPLOADING → UPLOADED → PROCESSING → SCHEDULED → PUBLISHED`, `UPLOAD_FAILED`), 5.9(Publisher 인터페이스, YouTube 규격, 할당량), 5.10(재시도 정책 — 본격 구현은 M8), 7(`Channel`, `PublishTask`), 8(`/api/publish-tasks`, `/api/channels`, OAuth 콜백). 이 파일의 "M5에서 정한 것", "M6에서 정한 것"
+
+**지금 상태 (M0~M6 완료, `main`)**
+- 업로드 직전까지 된다: 검수 승인 → 원본 화질 렌더(`RENDERED`). 렌더 파일은 `Clip.render_path`(`jobs/{id}/clips/{clip_id}/final.mp4`, `JobFiles.final()`), 썸네일은 `JobFiles.thumbnail(clip_id)`(`thumbnail.jpg`, 1280×720 JPG ≤ 2MB, 리포트는 문구 오버레이, 단신은 프레임 그대로)
+- 렌더 태스크: `backend/app/pipeline/tasks.py`의 `render_clip`(`clips.render`, media 큐)이 끝에서 `RENDERED`로 바꾼다 → **여기서 업로드 작업(PublishTask)을 만들어 publish 큐에 넣으면 된다**(7.5). 클립 단위 태스크·`publish_job_changed(job_id)` 패턴은 같은 파일 참고
+- 발행 설정(검수 화면에서 입력): `ClipMetadata.title`(이미 `원고 제목[목포MBC 뉴스데스크]` 형식, 100자 이내 검증), `description`, `tags`(500자 이내로 잘림), `hashtags`, `privacy`(private/unlisted/public = 공개 후 상태), `publish_at`(UTC 저장, 화면은 KST 입력; 있으면 예약 = private + publishAt), `channel_ids`(빈 목록 — 채널이 생기면 채움). 프로그램 프로필 `default_channels`(빈 목록) 칼럼이 이미 있다. 발행 설정은 승인·렌더 뒤에도 바꿀 수 있다(`review.PUBLISH_FIELDS`)
+- 클립 상태 집합: `review/service.py`의 `EDITABLE`, `REVIEWED`, `APPROVED_STATES`. 업로드 상태(`UPLOADING` 이후)를 추가하면 **"다시 열기"(`reopen`)를 막고**(이미 올라간 영상), 재실행 보호(`reviewed_clips`)·작업 목록 집계(`api/jobs.clip_counts`)에도 넣는다
+- 외부 연동 패턴: 인터페이스 + Fake + 설정으로 선택. 예시 `newsroom/provider.py`·`fake.py`·`factory.py`(`set_provider()`로 테스트에서 바꿔 끼움), `metadata/llm.py`·`factory.py`. → `publish/` 패키지에 `Publisher`, `FakePublisher`, `YouTubePublisher`, `PUBLISHER=fake|youtube`
+- 비밀값: MARS-L 키처럼 환경의 네트워크 비밀(프록시 주입)이 가능한 것은 헤더 방식뿐이다. Google OAuth는 클라이언트 ID/시크릿으로 토큰을 교환하고 refresh token을 DB에 **암호화** 저장해야 한다(spec 7 `oauth_token(encrypted)`) → 암호화 키는 설정(`TOKEN_ENCRYPTION_KEY`, Fernet 등). 시크릿은 커밋하지 않고 `.env`로
+- 화면: 클립 편집기 `frontend/src/pages/ClipEditorPage.tsx`의 메타데이터 폼(공개 설정·예약 칸 있음, **채널 선택 칸이 없음** — M5에서 미룬 것), `RenderStatus`(렌더 결과) 아래에 업로드 상태를 붙이면 된다. 작업 상세 `JobDetailPage.tsx`의 `BulkBar`(일괄 승인·순차 예약). 업로드 대시보드는 새 페이지(`/publish`)
+- 테스트: `tests/test_review.py`의 `reviewed` 픽스처(합성 원본 + 클립 3개)에서 승인하면 Celery 즉시 실행으로 바로 `RENDERED`가 된다 → 그 뒤 업로드를 Fake로 검증. E2E(`frontend/e2e/review.spec.ts`)는 렌더 완료까지 → Fake 업로드 완료를 덧붙인다
+
+**만들 것 (제안)**
+- 모델(마이그레이션 0011): `Channel`(platform, name, remote_channel_id, 암호화한 토큰, 일일 사용량·날짜), `PublishTask`(clip_id, channel_id, status, remote_id, remote_url, attempts, next_retry_at, last_error, resumable_uri, published_at, scheduled_at). 클립 하나에 채널마다 하나
+- `Publisher` 인터페이스(spec 5.9: upload, set_thumbnail, get_status, update, delete) + `FakePublisher`(가짜 remote_id, 예약 시각이 지나면 PUBLISHED로 보이게)
+- YouTube 어댑터: OAuth 2.0(관리자 연결 → `/api/channels/oauth/callback`, 토큰 암호화·갱신), `videos.insert` resumable(청크 8MB 배수, 세션 URI를 `resumable_uri`에 저장해 재개), `privacyStatus=private` + `publishAt`(예약, UTC), `categoryId=25`, `defaultLanguage=ko`, `thumbnails.set`. HTTP는 `httpx`(이미 의존성) 또는 Google 클라이언트 라이브러리 — 의존성 추가 여부를 정할 것
+- 할당량(7.4): `videos.insert` 1,600 units + `thumbnails.set` 50 units, 기본 하루 10,000 → 하루 약 6건. 채널별 사용량을 태평양 시간 자정 기준으로 세고, 넘으면 다음 날로 미루고 경고
+- 흐름(7.5): `RENDERED` + 채널 있음 → PublishTask(QUEUED) → publish 큐 업로드 → `UPLOADED`/`SCHEDULED` → (M8) 상태 폴링 → `PUBLISHED`. 업로드 대시보드(`GET /api/publish-tasks`), 채널 관리 화면
+- 재시도는 M7에서는 단순하게(일시 오류 몇 번), 오류 유형별 정책·폴링·장애 주입 테스트는 M8
+
+**사용자에게 받을 것 / 정할 것**
+- **YouTube 테스트 채널 + Google Cloud OAuth 클라이언트**(실제 업로드 확인, DoD). 없으면 Fake로 끝까지 만들고 실제 확인만 남긴다. 클라우드 세션에서 Google API에 접근하려면 환경 네트워크에 `oauth2.googleapis.com`, `www.googleapis.com`(업로드는 `youtube.googleapis.com`/`www.googleapis.com/upload`)이 허용돼야 한다 — 막히면 `get_environment`로 확인 후 요청
+- **YouTube API 할당량 증설 신청**(승인에 수 주) — 하루 업로드 편수(뉴스데스크 + 뉴스투데이의 리포트·단신 수)로 규모를 정해야 한다(spec 16-4)
+- 채널 구성: 목포MBC 채널 하나에 프로그램별 재생목록을 쓸지, 프로그램마다 채널이 다른지. 기본 공개 설정(지금 기본 private)
+- 업로드는 승인 즉시인지, 검수자가 "업로드" 버튼을 누를 때인지(지금 계획: 렌더 완료 즉시 자동)
+
+**기존 남은 일 (M7과 별개)**
+- 로그인(M0.7 보류): 지금은 `X-Reviewer` 헤더로 검수자를 구분하고 누구나 승인한다. 채널 연동(관리자 전용)과 함께 로그인을 만들지 정할 것
+- M3.8 원래 골든셋 4편 재현, M4 실제 Claude 호출(키 필요), HD 원본으로 썸네일 판정·렌더 시간 확인, 리포트 썸네일 템플릿 PNG 교체(사용자 제공 예정)
+
 ---
 
 ## M8. 상태 확인·재시도·알림 (파이프라인 10)
