@@ -73,6 +73,14 @@ class Settings(BaseSettings):
     thumbnail_candidates: int = 6
     thumbnail_samples: int = 12  # evenly spaced frames per clip, besides frames after scene cuts
 
+    # Final render (spec 5.6 6-b). Fades are off by default (the first frame stays the reviewed one).
+    render_max_height: int = 1080
+    render_crf: int = 18
+    render_preset: str = "fast"
+    render_loudness: float = -14.0  # LUFS, EBU R128 loudnorm 2-pass
+    render_fade_in: float = 0.0
+    render_fade_out: float = 0.0
+
     # Run Celery tasks in-process (tests, or running the API without workers).
     celery_always_eager: bool = False
 

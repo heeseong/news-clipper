@@ -45,3 +45,19 @@ def thumbnail_frame(thumbnail_id: int, db: DbSession) -> FileResponse:
     if thumb is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
     return _file(Path(thumb.path))
+
+
+@router.get("/clips/{clip_id}/final.mp4")
+def clip_final(clip_id: int, db: DbSession, download: bool = False) -> FileResponse:
+    """The rendered clip (M6): plays in the browser, or downloads for manual posting (?download=1)."""
+    clip = db.get(Clip, clip_id)
+    if clip is None or not clip.render_path:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "렌더된 클립이 없습니다")
+    path = Path(clip.render_path)
+    if not path.exists():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "렌더 파일이 없습니다")
+    if not download:
+        return FileResponse(path, media_type="video/mp4", headers=NO_CACHE)
+    item = clip.rundown_item
+    name = f"{item.item_no:02d}_{item.title}"[:80].replace("/", "_") + ".mp4"
+    return FileResponse(path, media_type="video/mp4", filename=name, headers=NO_CACHE)

@@ -23,7 +23,8 @@ TITLE_MAX = 100
 MIN_CLIP_SECONDS = 1.0
 PRIVACY = ("private", "unlisted", "public")
 # A clip in these states was looked at: an align re-run asks before throwing it away.
-REVIEWED = (ClipStatus.APPROVED, ClipStatus.REJECTED)
+REVIEWED = (ClipStatus.APPROVED, ClipStatus.REJECTED, ClipStatus.RENDERING, ClipStatus.RENDERED)
+APPROVED_STATES = (ClipStatus.APPROVED, ClipStatus.RENDERING, ClipStatus.RENDERED)
 # Editable states (later states belong to rendering and publishing, M6/M7).
 EDITABLE = (ClipStatus.DRAFT, ClipStatus.NOT_FOUND)
 
@@ -251,8 +252,9 @@ def approval_problems(session: Session, clip: Clip, now: datetime | None = None)
 
 
 def approve(session: Session, clip: Clip, user: User) -> None:
+    """Approve; the caller then queues the final render (render_requested)."""
     check_lock(clip, user)
-    if clip.status == ClipStatus.APPROVED:
+    if clip.status in APPROVED_STATES:
         return
     if clip.status not in EDITABLE:
         raise ReviewError(f"이 상태({clip.status})에서는 승인할 수 없습니다")
@@ -264,7 +266,26 @@ def approve(session: Session, clip: Clip, user: User) -> None:
     clip.reject_reason = None
     audit(session, user, clip, "approve", {"status": [str(before), "APPROVED"]})
     session.flush()
-    # The final render (M6) starts from here.
+
+
+def request_render(session: Session, clip: Clip, user: User | None = None) -> None:
+    """Render (again) an approved clip: after approval, after a failed render, or on request."""
+    if clip.status not in APPROVED_STATES:
+        raise ReviewError("승인된 클립만 렌더할 수 있습니다")
+    if clip.status == ClipStatus.RENDERING and not clip.render_error:
+        raise ReviewError("렌더 중입니다")
+    if user is not None and clip.status == ClipStatus.RENDERED:
+        audit(session, user, clip, "render", {"status": ["RENDERED", "APPROVED"]})
+    clip.status, clip.render_error = ClipStatus.APPROVED, None
+    session.flush()
+
+
+def discard_render(clip: Clip) -> None:
+    """A reopened clip's render is out of date: remove it."""
+    from app.storage import JobFiles
+
+    JobFiles(clip.job_id).final(clip.id).unlink(missing_ok=True)
+    clip.render_path = clip.rendered_at = clip.render_error = None
 
 
 def reject(session: Session, clip: Clip, user: User, reason: str | None) -> None:
@@ -282,10 +303,11 @@ def reopen(session: Session, clip: Clip, user: User) -> None:
     """Back to editing (before rendering starts)."""
     check_lock(clip, user)
     if clip.status not in REVIEWED:
-        raise ReviewError("승인·반려된 클립만 다시 열 수 있습니다")
+        raise ReviewError("승인·반려·렌더된 클립만 다시 열 수 있습니다")
     before = clip.status
     clip.status = ClipStatus.DRAFT if not clip.needs_manual_range else ClipStatus.NOT_FOUND
     clip.reviewed_at = clip.reviewed_by = None
+    discard_render(clip)
     audit(session, user, clip, "reopen", {"status": [str(before), str(clip.status)]})
     session.flush()
 

@@ -39,6 +39,8 @@ def clip_out(clip: Clip, model: type[ClipOut] = ClipOut) -> ClipOut:
     out.youtube_title = clip.metadata_.title if clip.metadata_ else None
     out.thumbnail_url = thumbnail_url(clip)
     out.kind = clip_kind(clip)
+    if clip.render_path and clip.rendered_at:
+        out.render_url = f"/media/clips/{clip.id}/final.mp4?v={_version(clip.rendered_at)}"
     holder = lock_holder(clip)
     out.locked_by_name = holder.name if holder else None
     return out

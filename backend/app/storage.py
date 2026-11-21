@@ -7,7 +7,7 @@ jobs/{job_id}/proxy/proxy.mp4, sprite.jpg, sprite.json, waveform.json
 jobs/{job_id}/audio/align.wav
 jobs/{job_id}/analysis/scenes.json, silences.json, logprobs.npz, alignment.json
 jobs/{job_id}/newsroom/rundown.json, scripts/{item_no}.json
-jobs/{job_id}/clips/{clip_id}/thumb_candidates/{rank}.jpg, thumbnail.jpg
+jobs/{job_id}/clips/{clip_id}/final.mp4, thumb_candidates/{rank}.jpg, thumbnail.jpg
 branding/                      logos and fonts for thumbnail templates
 """
 
@@ -105,6 +105,10 @@ class JobFiles:
     def thumb_candidates_dir(self, clip_id: int) -> Path:
         """Candidate frames (1280x720, no text)."""
         return self.clip_dir(clip_id) / "thumb_candidates"
+
+    def final(self, clip_id: int) -> Path:
+        """The approved clip rendered from the original (M6)."""
+        return self.clip_dir(clip_id) / "final.mp4"
 
     def thumbnail(self, clip_id: int) -> Path:
         """The selected candidate with the text overlay (what is uploaded)."""

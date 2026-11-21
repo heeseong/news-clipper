@@ -40,7 +40,7 @@ def clip_counts(db: Session, job_ids: list[int]) -> dict[int, ClipCounts]:
             Clip.job_id,
             func.count(),
             func.count(Clip.start_sec),
-            func.sum(case((Clip.status == ClipStatus.APPROVED, 1), else_=0)),
+            func.sum(case((Clip.status.in_([ClipStatus.APPROVED, ClipStatus.RENDERING, ClipStatus.RENDERED]), 1), else_=0)),
             func.sum(case((Clip.status == ClipStatus.REJECTED, 1), else_=0)),
         )
         .where(Clip.job_id.in_(job_ids))
