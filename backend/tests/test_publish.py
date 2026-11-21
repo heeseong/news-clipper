@@ -74,7 +74,8 @@ def test_approve_render_upload_schedule_then_published(reviewed, client, channel
     meta = d["metadata"]
     assert video["title"] == meta["title"] and video["privacy"] == "public" and video["thumbnail"]
     assert video["publish_at"].startswith("2030-01-01T09:00") and video["category_id"] == "25" and video["language"] == "ko"
-    assert video["description"] == meta["description"]  # as reviewed, nothing appended
+    # As reviewed, with the hashtags at the end (2026-11-21).
+    assert video["description"] == meta["description"] + "\n\n" + " ".join(meta["hashtags"])
     # Uploaded: no reopening, no changing the schedule (cancel first).
     assert client.post(f"/api/clips/{cid}/reopen", headers=A).status_code == 409
     r = client.patch(f"/api/clips/{cid}", json={"privacy": "private"}, headers=A)

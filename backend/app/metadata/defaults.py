@@ -4,7 +4,7 @@
   "{title}[{station} {program}]" → "…원고 제목[목포MBC 뉴스데스크]" like the channel (2026-11-21)
 - description: "[목포MBC 뉴스]" + the script as written in the newsroom (2026-11-21, user decision;
   before: the anchor lead + a footer), within YouTube's 5,000 bytes. The program's footer template
-  is added only when set
+  is added only when set; the hashtags are added at the end on upload
 - tags: program default tags + reporter + region names found in the script (+ LLM keywords later)
 - thumbnail text: the script memo is always empty in the real API, so the title (see thumbnail_text)
 """
@@ -89,6 +89,7 @@ def footer(script: ClipScript, template: str | None) -> str:
 
 
 YOUTUBE_DESCRIPTION_MAX_BYTES = 5000
+HASHTAG_ROOM_BYTES = 300  # hashtags are added at upload (app/publish/service.with_hashtags)
 
 
 def _fit_bytes(text: str, limit: int) -> str:
@@ -110,7 +111,7 @@ def description(script: ClipScript, footer_template: str | None) -> str:
     head = _format(DESCRIPTION_HEADER, _values(script)).strip()
     tail = footer(script, footer_template) if footer_template and footer_template.strip() else ""
     body = script.script_text.strip() or " ".join(script.lead).strip()
-    room = YOUTUBE_DESCRIPTION_MAX_BYTES - len(head.encode()) - len(tail.encode()) - 4
+    room = YOUTUBE_DESCRIPTION_MAX_BYTES - HASHTAG_ROOM_BYTES - len(head.encode()) - len(tail.encode()) - 4
     text = "\n".join(p for p in (head, _fit_bytes(body, room)) if p)
     return f"{text}\n\n{tail}" if tail else text
 

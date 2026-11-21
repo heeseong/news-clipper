@@ -115,14 +115,18 @@ def test_description_matches_the_users_example():
 
     raw = USER_EXAMPLE.replace("\n전남", "\n 전남").replace("입니다.\n◀ END", "입니다.  \n◀ END") + "\n"
     script = ClipScript(**{**REPORT.__dict__, "script_text": tidy_script(raw)})
-    assert defaults.build(script, None, []).description == "[목포MBC 뉴스]\n" + USER_EXAMPLE
+    expected = USER_EXAMPLE.replace("◀ 리포트 ▶\n\n", "◀ 리포트 ▶\n")  # no blank after a marker
+    assert defaults.build(script, None, []).description == "[목포MBC 뉴스]\n" + expected
 
 
 def test_script_whitespace_is_tidied_but_the_text_kept():
     from app.metadata.script import tidy_script
 
     raw = "◀ 앵 커 ▶\r\n\n 민형배 시장이 \n항의했습니다.\n\n\n\n 서일영 기자입니다.  \n"
-    assert tidy_script(raw) == "◀ 앵 커 ▶\n\n민형배 시장이\n항의했습니다.\n\n서일영 기자입니다."
+    assert tidy_script(raw) == "◀ 앵 커 ▶\n민형배 시장이\n항의했습니다.\n\n서일영 기자입니다."
+    # No blank line right after a marker (2026-11-21), but the one after ◀ END ▶ stays.
+    raw = "◀ 앵 커 ▶\n\n앵커 문장\n◀ END ▶\n\n◀ 리포트 ▶\n\n◀ SYNC ▶ 김주민 / 주민\n\n인터뷰\n"
+    assert tidy_script(raw) == "◀ 앵 커 ▶\n앵커 문장\n◀ END ▶\n\n◀ 리포트 ▶\n◀ SYNC ▶ 김주민 / 주민\n인터뷰"
 
 
 def test_brief_description_without_a_stored_script_uses_its_text_and_footer_template():

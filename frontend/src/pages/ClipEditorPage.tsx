@@ -560,7 +560,7 @@ function MetadataForm({ clip, meta, readOnly, publishEditable, save, saving }: {
         <input value={f.tags} onChange={set("tags")} disabled={readOnly} />
       </label>
       <label>
-        해시태그
+        해시태그 <span className="muted">(업로드할 때 설명 끝에 붙습니다)</span>
         <input value={f.hashtags} onChange={set("hashtags")} disabled={readOnly} />
       </label>
       <div className="row">

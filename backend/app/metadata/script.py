@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Literal
@@ -37,13 +38,20 @@ def _body_line(kind: SentenceKind, text: str, speaker: str | None) -> str:
     return text
 
 
+# ◀ 앵 커 ▶, ◀ 리포트 ▶, ◀ SYNC ▶ 전경선 / … (not ◀ END ▶: the blank line after it separates sections)
+MARKER_RE = re.compile(r"^◀(?!\s*E\s*N\s*D\s*▶).*▶")
+
+
 def tidy_script(text: str) -> str:
     """The newsroom script as written, with only the whitespace tidied: spaces at line ends and
-    starts, and runs of blank lines (the markers ◀ 앵 커 ▶ … and the editor's line breaks stay)."""
+    starts, runs of blank lines, and blank lines right after a marker line such as ◀ 앵 커 ▶
+    (2026-11-21). The markers and the editor's line breaks stay."""
     lines = [line.strip() for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
     out: list[str] = []
     for line in lines:
-        if line or (out and out[-1]):
+        if line:
+            out.append(line)
+        elif out and out[-1] and not MARKER_RE.match(out[-1]):
             out.append(line)
     return "\n".join(out).strip()
 

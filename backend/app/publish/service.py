@@ -99,9 +99,15 @@ def has_remote_video(session: Session, clip_id: int) -> bool:
     return any(t.remote_id for t in current_tasks(session, clip_id))
 
 
+def with_hashtags(description: str, hashtags: list[str]) -> str:
+    """The reviewed description with the clip's hashtags at the end (2026-11-21), unless already there."""
+    missing = [h for h in hashtags if h and h not in description]
+    return f"{description.rstrip()}\n\n{' '.join(missing)}".strip() if missing else description
+
+
 def publish_meta(meta: ClipMetadata, privacy: str | None = None, publish_at: datetime | None = None) -> PublishMeta:
     s = get_settings()
-    description = meta.description or ""  # as reviewed (hashtags are not appended, 2026-11-21)
+    description = with_hashtags(meta.description or "", meta.hashtags or [])
     return PublishMeta(
         title=meta.title, description=description, tags=list(meta.tags or []),
         privacy=privacy or meta.privacy, publish_at=_aware(publish_at if publish_at is not None else meta.publish_at),

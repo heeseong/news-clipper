@@ -360,7 +360,7 @@ news-clipper/
 **DoD**: 테스트 채널에 비공개 예약 업로드가 성공하고, 예약 시각에 공개되며 썸네일과 메타데이터가 반영된다.
 
 ### M7 뒤에 바뀐 것
-- **유튜브 설명 = `[목포MBC 뉴스]` + 큐시트 원고 그대로 (2026-11-21 사용자 결정, 사용자가 준 예시와 같은 형식)**. 이전에는 앵커 리드 + 꼬리말(취재 기자·방송일)이었다. 원고는 저장한 큐시트 응답(`Rundown.raw`)의 `articleContent`에서 줄 앞뒤 공백과 연속 빈 줄만 정리한다(`metadata/script.tidy_script`). ◀ 앵 커 ▶, ◀ 리포트 ▶, ◀ SYNC ▶, ◀ END ▶ 같은 표시와 편집기 줄바꿈(단어 중간이라도)은 그대로 둔다. 꼬리말은 프로그램 프로필 `description_footer`를 정했을 때만 붙이고, 업로드 때 해시태그를 설명에 덧붙이지 않는다(검수한 설명 그대로 올림). YouTube 5,000바이트를 넘으면 원고를 줄 단위로 자른다(…). 이미 만든 메타데이터는 "다시 만들기"를 해야 바뀐다
+- **유튜브 설명 = `[목포MBC 뉴스]` + 큐시트 원고 그대로 (2026-11-21 사용자 결정, 사용자가 준 예시와 같은 형식)**. 이전에는 앵커 리드 + 꼬리말(취재 기자·방송일)이었다. 원고는 저장한 큐시트 응답(`Rundown.raw`)의 `articleContent`에서 줄 앞뒤 공백, 연속 빈 줄, **표시 줄(◀ 앵 커 ▶, ◀ 리포트 ▶, ◀ SYNC ▶ …) 바로 다음의 빈 줄**만 정리한다(`metadata/script.tidy_script`, 2026-11-21 사용자 요청. ◀ END ▶ 뒤의 빈 줄은 앵커·리포트 구분이라 남긴다). 표시와 편집기 줄바꿈(단어 중간이라도)은 그대로 둔다. 꼬리말은 프로그램 프로필 `description_footer`를 정했을 때만 붙인다. **해시태그는 업로드 때 설명 끝에 붙인다**(빈 줄 뒤 `#a #b`, 이미 있으면 생략. 2026-11-21 사용자 요청 — 바로 전 결정을 되돌림). YouTube 5,000바이트를 넘으면 원고를 줄 단위로 자른다(…). 이미 만든 메타데이터는 "다시 만들기"를 해야 바뀐다
 
 ### M7에서 정한 것
 - **흐름**: 승인 → 렌더(`RENDERED`) → 클립의 `channel_ids`마다 `PublishTask`(QUEUED) → publish 워커 업로드(UPLOADING) → UPLOADED → 예약이면 SCHEDULED, 아니면 PROCESSING → PUBLISHED. 실패는 FAILED, 사용자 취소는 CANCELLED(기록으로 남김). **클립 상태는 작업 중 가장 덜 진행된 것**(실패가 하나라도 있으면 `UPLOAD_FAILED`)
@@ -370,7 +370,7 @@ news-clipper/
 - **예약**: `privacyStatus=private` + `publishAt`(UTC). 업로드 시작 때 예약 시각이 2분 안이거나 지났으면 올리지 않고 실패(invalid)로 둔다 → 시각을 바꾸고 다시 시도. 예약 시각이 15분 지나도 비공개면 실패로 알린다(미인증 API 프로젝트는 비공개로 고정됨, 아래)
 - **재시도(M7 범위)**: 네트워크·5xx·429·rateLimit → 1, 2, 4, 8, 16분 뒤(최대 `PUBLISH_MAX_ATTEMPTS`=5), 같은 resumable 세션으로 이어 올린다(청크 실패는 프로세스 안에서 3번 먼저 이어 본다). 401 → 토큰 갱신 후 한 번 더, 그래도 실패면 채널 "다시 연결 필요". 400·403(forbidden 등) → 재시도 없이 실패. 할당량 → 다음 날. 썸네일만 실패하면 영상은 두고 썸네일만 다시(버튼). 수동 "다시 시도"는 횟수를 처음부터 센다
 - **Celery beat**(1분, `publish.sweep`): 재시도 시각이 된 작업 시작, 10분 넘게 진척 없는 업로드 재시작, 상태 확인(처리 중 2분마다, 예약 시각 직후와 그 뒤 5분마다, 처리 전인 예약 영상 10분마다). Compose에 `beat` 서비스 추가. 점진적 폴링·알림은 M8
-- **설명**: 검수한 설명 그대로 올린다(2026-11-21부터 해시태그를 덧붙이지 않음). 제목·설명의 `<` `>`는 전각으로 바꾼다(YouTube 거부 문자). 태그는 YouTube 500자 계산(쉼표, 공백 있는 태그는 따옴표)으로 자른다. `categoryId=25`, `defaultLanguage=defaultAudioLanguage=ko`, `selfDeclaredMadeForKids=false`
+- **설명**: 검수한 설명 끝에 해시태그를 붙여 올린다(이미 있으면 그대로). 제목·설명의 `<` `>`는 전각으로 바꾼다(YouTube 거부 문자). 태그는 YouTube 500자 계산(쉼표, 공백 있는 태그는 따옴표)으로 자른다. `categoryId=25`, `defaultLanguage=defaultAudioLanguage=ko`, `selfDeclaredMadeForKids=false`
 - **할당량은 Google Cloud 프로젝트 단위**라 채널마다가 아니라 플랫폼 전체로 센다(spec 7의 `Channel.quota_used_today` 대신 `quota_usage` 표). 비용은 설정값(`YOUTUBE_QUOTA_INSERT`=1600, `_THUMBNAIL`=50)
 - **OAuth**: 범위는 `https://www.googleapis.com/auth/youtube` 하나(업로드·썸네일·상태·삭제). 클라이언트 시크릿은 토큰 엔드포인트에 HTTP Basic으로 보낸다 → 프록시가 넣어 줄 수도 있다(`GOOGLE_CLIENT_SECRET=proxy-injected`). 리디렉트 방식은 https(또는 localhost) 주소가 필요해서, 사내 http 서버에서는 **기기 코드 방식**(클라이언트 유형 "TV 및 입력 제한 기기")을 쓴다. 토큰은 `TOKEN_ENCRYPTION_KEY`(Fernet) 없이는 저장하지 않는다
 - **권한**: 로그인(M0.7)이 없어 지금은 검수자 이름만 있으면 누구나 채널을 연결·해제한다(spec은 관리자). 업로드 취소(영상 삭제)는 확인 창을 거친다
