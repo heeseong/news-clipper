@@ -373,6 +373,11 @@ news-clipper/
 - **권한**: 로그인(M0.7)이 없어 지금은 검수자 이름만 있으면 누구나 채널을 연결·해제한다(spec은 관리자). 업로드 취소(영상 삭제)는 확인 창을 거친다
 - **SQLite에서 예약 시각이 9시간 어긋나던 문제(M5부터)**: `+09:00` 시각을 그대로 저장해 SQLite가 시간대를 버렸다 → 저장 전에 UTC로 바꾼다(PostgreSQL은 원래 맞았다)
 
+### 실제 채널 확인 (2026-11-21, 테스트 채널 `UCOj1kGSkQmNtX_zhMJgmu3A`)
+- 기기 코드 방식으로 채널 연결 성공. 처음 받은 클라이언트는 "TV 및 입력 제한 기기" 유형이 아니어서 `Invalid client type` → 새로 만든 TV 유형 클라이언트로 연결
+- 합성 녹화본(1280×720, 20초) 클립 8초: 업로드(resumable) → `privacyStatus=private` + `publishAt` 예약 → 맞춤 썸네일 반영(maxres) → 제목·설명(해시태그 포함)·태그·`categoryId=25`·`defaultLanguage=ko` 반영을 `videos.list`로 확인
+- 예약 시각 뒤 공개 여부: (확인 중)
+
 ### 실제 채널 확인 절차 (DoD, 사용자 준비물 필요)
 1. Google Cloud 프로젝트에서 **YouTube Data API v3 사용 설정**, OAuth 동의 화면(외부, 테스트 모드면 채널 소유 Google 계정을 테스트 사용자로 추가), OAuth 클라이언트 **"TV 및 입력 제한 기기"** 생성 → 클라이언트 ID·시크릿
 2. 서버 `.env`: `PUBLISHER=youtube`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `TOKEN_ENCRYPTION_KEY`. 클라우드 세션에서는 시크릿을 `request_credential`(호스트 `oauth2.googleapis.com`, 사용자 이름 = 클라이언트 ID, 비밀번호 = 시크릿, Basic)로 받고 `GOOGLE_CLIENT_SECRET=proxy-injected`. 네트워크에 `oauth2.googleapis.com`, `www.googleapis.com` 허용 필요
