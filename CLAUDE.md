@@ -5,7 +5,7 @@
 
 ## 먼저 읽을 것
 - `spec.md` — 기능 명세(v1.0). 정렬·경계 규칙의 근거는 5.5절
-- `plan.md` — 마일스톤과 진행 상태. M0~M4 구현(로그인 보류, M3는 원래 골든셋 4편 재현, M4는 실제 Claude 호출·HD 녹화본 확인이 남음). 다음 작업은 **M5(검수 화면)**. 각 마일스톤의 "정한 것"에 규칙이 있다
+- `plan.md` — 마일스톤과 진행 상태. M0~M5 구현(로그인 보류, M3는 원래 골든셋 4편 재현, M4는 실제 Claude 호출·HD 녹화본 확인이 남음, M5 채널 선택은 M7 뒤). 다음 작업은 **M6(최종 렌더)**. 각 마일스톤의 "정한 것"에 규칙이 있다
 - `eval/poc/RESULTS.md` — 정렬 PoC 결과와 방송별 실패 사례
 
 ## 핵심 결정 (바꾸기 전에 사용자와 확인)
@@ -21,7 +21,7 @@
 
 ## 저장소 구조 (현재)
 - `backend/app/core/` — 설정(`config.py`, 환경변수), JSON 로깅, DB 세션
-- `backend/app/models/` — SQLAlchemy 모델(User, ProgramProfile, Job, JobStep, Rundown, RundownItem, Clip, AlignedSentence, ClipMetadata, Thumbnail). 바꾸면 Alembic 마이그레이션(`backend/alembic/versions/000N_설명.py`, 현재 0008)도 만든다
+- `backend/app/models/` — SQLAlchemy 모델(User, ProgramProfile, Job, JobStep, Rundown, RundownItem, Clip, AlignedSentence, ClipMetadata, Thumbnail, AuditLog). 바꾸면 Alembic 마이그레이션(`backend/alembic/versions/000N_설명.py`, 현재 0009)도 만든다
 - `backend/app/pipeline/` — 단계 정의(`definition.py`), 상태 전이(`orchestrator.py`, Celery 없음), Celery 태스크(`tasks.py`), 단계 처리기(`handlers.py`, `@register("proxy")`). 처리기가 없는 단계는 SKIPPED
 - `backend/app/media/` — ffprobe·ffmpeg 래퍼(`ffmpeg.py`), 프록시·스프라이트·파형(`proxy.py`), 정렬용 오디오·장면 전환·무음(`analysis.py`)
 - `backend/app/uploads.py`, `api/uploads.py` — tus 업로드. `intake.py` — 업로드 → 작업 생성(ffprobe 검증, 경고). `storage.py` — 저장 경로
@@ -33,8 +33,9 @@
 - `backend/app/models/clip.py` — Clip(DRAFT, 판정 실패면 구간 null), AlignedSentence. `models/metadata.py` — ClipMetadata, Thumbnail (Clip에 CASCADE)
 - `backend/app/metadata/` — 메타데이터(M4): 클립 원고(`script.py`), 원고 기반 기본값(`defaults.py`), 사실성 검사(`factcheck.py`), LLM 인터페이스·Fake(`llm.py`), Claude(`claude.py`), 선택(`factory.py`, 설정 `LLM_PROVIDER=off|fake|claude`), 단계·재생성(`service.py`)
 - `backend/app/thumbnails/` — 썸네일(M4): 후보 시각·추출·점수(`candidates.py`, 얼굴 YuNet `models/`), 오버레이(`overlay.py`, 폰트 `fonts/`), 단계(`service.py`)
+- `backend/app/review/` — 검수(M5): 검수자(헤더 `X-Reviewer`, 로그인 전 임시), 잠금, 구간·메타 수정, 썸네일 선택·추가, 승인·반려·다시 열기, 재실행 보호, 감사 로그. 라우터 `api/review.py`
 - `backend/tests/` — 단위 테스트. `tests/fixtures/synthetic.py`는 FFmpeg 합성 테스트 영상(컷·무음 위치를 알고 있음)
-- `frontend/` — React + Vite + TS. `src/api/`(API 클라이언트·TanStack Query 훅), `src/pages/`
+- `frontend/` — React + Vite + TS. `src/api/`(API 클라이언트·TanStack Query 훅), `src/pages/`(작업 목록·상세, 업로드, 클립 편집기 `ClipEditorPage`), `e2e/`(Playwright E2E, `npm run e2e`)
 - `docker-compose.yml` — 서버 한 대 배포(postgres, redis, migrate, api, 워커 4개, web)
 - `eval/tools/` — MARS-L 출력물(PDF) → API 형식 JSON 변환기(API 키를 받기 전 임시용), 파싱 검토 리포트 생성
 - `eval/poc/` — 정렬 PoC 스크립트(`compute_logits.py`, `align_poc.py`). 서비스 코드는 `backend/app/align/`
@@ -47,6 +48,7 @@ cd backend && uv pip install torch --index-url https://download.pytorch.org/whl/
 cd backend && .venv/bin/python -m pytest -q   # SQLite + Celery 즉시 실행. 외부 서비스 불필요
 cd backend && .venv/bin/ruff check .
 cd frontend && npm install && npm run lint && npm run build
+cd frontend && npm run e2e                     # 업로드 → 검수 → 승인 E2E (Fake, 백엔드·Vite를 스스로 띄움)
 docker compose up -d --build                  # 전체 스택, http://localhost:8080
 python eval/tools/marsl_pdf_export.py CUESHEET.pdf SCRIPTS.pdf eval/data/<날짜>-<프로그램>
 python eval/tools/inspect_rundown.py eval/data/<날짜>-<프로그램>
@@ -56,6 +58,7 @@ cd backend && .venv/bin/python ../eval/tools/score_alignment.py ../eval/data/<�
 
 ## 데이터 규칙
 - 실제 방송 자료(녹화본, 큐시트·원고 PDF, 정답, 클립)는 `eval/data/`에 두고 **커밋하지 않는다**(.gitignore). 세션이 바뀌면 사라지므로 필요할 때 사용자에게 다시 받는다
+- PyTorch 없이 전체 스택을 띄울 때는 `ALIGN_MODEL=fake:silent`(모든 아이템 미검출 → 수동 구간 지정)
 - 테스트에는 합성 데이터만 쓴다. 테스트는 실제 정렬 모델을 불러오지 않는다(`conftest.py`가 무음 log-prob으로 바꿔 끼움)
 
 ## 환경 메모 (클라우드 세션)
