@@ -5,6 +5,7 @@
 - 기능 명세: [`spec.md`](spec.md)
 - 구현 계획·진행 상태·마일스톤별 결정: [`plan.md`](plan.md)
 - 정렬 PoC 결과: [`eval/poc/RESULTS.md`](eval/poc/RESULTS.md)
+- 배포·운영(HTTPS, 업데이트, 보존, 백업·복원): [`docs/deploy.md`](docs/deploy.md)
 - 개발 메모(작업 규칙, 세션 환경): [`CLAUDE.md`](CLAUDE.md)
 
 ## 흐름
@@ -30,7 +31,7 @@
 | `worker-align` | 원고-오디오 강제 정렬 (PyTorch 이미지, 동시 실행 1) |
 | `worker-ai` | MARS-L·Claude 호출, 파이프라인 진행 |
 | `worker-publish` | YouTube 업로드·상태 확인·수정 반영 |
-| `beat` | 1분마다 업로드 재시도·상태 확인 (한 대만) |
+| `beat` | 1분마다 업로드 재시도·상태 확인, 매일 보존 정리 (한 대만) |
 | `postgres`, `redis` | DB, Celery 브로커 |
 
 CPU를 많이 쓰는 media·align 워커는 동시 실행 수를 낮게 둬서 웹이 느려지지 않게 한다(`.env`의 `*_CONCURRENCY`).
@@ -42,7 +43,7 @@ cp .env.example .env    # 비밀번호, 외부 연동, 동시 실행 수
 docker compose up -d --build
 ```
 
-http://localhost:8080 — 작업 목록, 녹화본 올리기, 게시 현황, 채널 화면.
+http://localhost:8080 — 작업 목록, 녹화본 올리기, 게시 현황, 채널, 관리(프로그램 프로필, 저장 공간·보존 정리, 운영 지표). 로그인은 없다(이름만 넣고 쓴다) — 사내망에서만 접속되게 둔다. 운영 서버 설치는 [`docs/deploy.md`](docs/deploy.md).
 
 주요 설정(`.env`, 전체는 `.env.example`과 `backend/app/core/config.py`):
 
@@ -53,6 +54,7 @@ http://localhost:8080 — 작업 목록, 녹화본 올리기, 게시 현황, 채
 | `LLM_PROVIDER` | `claude`(`ANTHROPIC_API_KEY` 필요) / `fake` / `off`. LLM은 제목 후보 등 보조만 |
 | `PUBLISHER` | `youtube`(`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `TOKEN_ENCRYPTION_KEY` 필요) / `fake` |
 | `ENABLE_DEV_ENDPOINTS` | 운영에서는 `false` (더미 작업 버튼) |
+| `RETENTION_ENABLED` | 보존 정리(원본 30일 등). 기본 `false` |
 
 YouTube 채널 연결: OAuth 클라이언트 유형 "TV 및 입력 제한 기기"를 만들고, 채널 화면에서 "Google 계정으로 연결" → google.com/device에 코드 입력. 자세한 절차는 `plan.md`의 M7 "실제 채널 확인 절차".
 
