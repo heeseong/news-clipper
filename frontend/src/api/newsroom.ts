@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { api } from "./client";
+import { api, withReviewGuard } from "./client";
 import type { Clip, ClipDetail, JobDetail, Rundown, RundownPreview } from "./types";
 
 /** Which cue sheet a recording of this program and date would be matched to (upload form). */
@@ -31,7 +31,9 @@ export function useRefreshRundown(jobId: number) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (cueSheetId: number | null) =>
-      api.post<JobDetail>(`/api/jobs/${jobId}/rundown/refresh`, { cue_sheet_id: cueSheetId }),
+      withReviewGuard((force) =>
+        api.post<JobDetail>(`/api/jobs/${jobId}/rundown/refresh${force ? "?force=true" : ""}`, { cue_sheet_id: cueSheetId }),
+      ),
     onSuccess: (job) => {
       qc.setQueryData(["jobs", jobId], job);
       qc.invalidateQueries({ queryKey: ["jobs"], exact: true });

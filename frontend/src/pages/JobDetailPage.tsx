@@ -1,14 +1,17 @@
-import { useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { useAnalysis, useJob, usePipeline, useRetryStep } from "../api/jobs";
-import { useJobClips } from "../api/newsroom";
-import type { JobDetail, JobStep } from "../api/types";
+import { useJobClips, useJobRundown } from "../api/newsroom";
+import { useBulk } from "../api/review";
+import type { Clip, JobDetail, JobStep } from "../api/types";
 import { ClipMetaPanel } from "../components/ClipMetaPanel";
+import { JobTimeline } from "../components/JobTimeline";
 import { RundownPanel } from "../components/RundownPanel";
 import { JobStatusBadge, StepStatusBadge } from "../components/StatusBadge";
 import {
   CLIP_FLAG_LABEL,
+  CLIP_STATUS_LABEL,
   SNAP_LABEL,
   STAGE_LABEL,
   STEP_LABEL,
@@ -93,8 +96,8 @@ export function JobDetailPage() {
       </div>
       {retry.isError && <p className="error-box">재시도하지 못했습니다: {retry.error.message}</p>}
 
-      {!data.is_dummy && <RundownPanel job={data} />}
       {!data.is_dummy && <MediaPanel job={data} />}
+      {!data.is_dummy && <RundownPanel job={data} />}
     </section>
   );
 }
@@ -151,6 +154,24 @@ function MediaPanel({ job }: { job: JobDetail }) {
     alignStep?.status === "SUCCEEDED" ? clipSteps.map((s) => `${s.status}:${s.finished_at}`).join("|") : null;
   const clips = useJobClips(job.id, clipsVersion);
   const [openClip, setOpenClip] = useState<number | null>(null);
+  const newsroomStep = job.steps.find((s) => s.step === "newsroom");
+  const rundown = useJobRundown(
+    job.id,
+    newsroomStep?.status === "SUCCEEDED" ? `${newsroomStep.finished_at ?? "done"}|${alignStep?.finished_at ?? ""}` : null,
+  );
+  const navigate = useNavigate();
+  const [t, setT] = useState(0);
+  useEffect(() => {
+    const v = video.current;
+    if (!v) return;
+    const on = () => setT(v.currentTime);
+    v.addEventListener("timeupdate", on);
+    v.addEventListener("seeked", on);
+    return () => {
+      v.removeEventListener("timeupdate", on);
+      v.removeEventListener("seeked", on);
+    };
+  });
 
   const seek = (t: number) => {
     if (!video.current) return;
@@ -159,6 +180,19 @@ function MediaPanel({ job }: { job: JobDetail }) {
   };
 
   return (
+    <>
+    {job.duration && rundown.data && (
+      <JobTimeline
+        jobId={job.id}
+        duration={job.duration}
+        fps={job.fps}
+        items={rundown.data.items}
+        clips={clips.data ?? []}
+        t={t}
+        onSeek={(time) => seek(time)}
+        onOpen={(clipId) => navigate(`/jobs/${job.id}/clips/${clipId}`)}
+      />
+    )}
     <div className="media-panel">
       <div className="player">
         {a.proxy && proxyStep?.status === "SUCCEEDED" ? (
@@ -191,6 +225,8 @@ function MediaPanel({ job }: { job: JobDetail }) {
           ) : clips.data.length === 0 ? (
             <p className="muted small">업로드 대상 기사가 없습니다</p>
           ) : (
+            <>
+            <BulkBar clips={clips.data} />
             <ol className="signal-list clip-list">
               {clips.data.map((c) => (
                 <li key={c.id}>
@@ -198,8 +234,11 @@ function MediaPanel({ job }: { job: JobDetail }) {
                     {c.thumbnail_url && <img className="clip-thumb" src={c.thumbnail_url} alt="" />}
                     <div>
                       <strong>
-                        {c.item_no}. {c.title}
-                      </strong>
+                        <Link to={`/jobs/${job.id}/clips/${c.id}`}>
+                          {c.item_no}. {c.title}
+                        </Link>
+                      </strong>{" "}
+                      <span className={`tag status-${c.status}`}>{CLIP_STATUS_LABEL[c.status] ?? c.status}</span>
                       {c.youtube_title && c.youtube_title !== c.title && (
                         <div className="small">{c.youtube_title}</div>
                       )}
@@ -256,6 +295,7 @@ function MediaPanel({ job }: { job: JobDetail }) {
                 </li>
               ))}
             </ol>
+            </>
           )
         ) : !(tab === "cuts" ? analysis.data?.scenes : analysis.data?.silences) ? (
           <p className="muted small">분석이 끝나면 표시됩니다</p>
@@ -282,6 +322,54 @@ function MediaPanel({ job }: { job: JobDetail }) {
           </ol>
         )}
       </div>
+    </div>
+    </>
+  );
+}
+
+/** Approve several clips, or schedule them one after another (spec 5.8 일괄 처리). */
+function BulkBar({ clips }: { clips: Clip[] }) {
+  const bulk = useBulk();
+  const reviewable = clips.filter((c) => c.status === "DRAFT" && !c.needs_manual_range);
+  const [first, setFirst] = useState("");
+  const [interval, setInterval_] = useState(10);
+  const [result, setResult] = useState<string | null>(null);
+  const ids = clips.filter((c) => c.status === "DRAFT" || c.status === "APPROVED").map((c) => c.id);
+  if (!clips.length) return null;
+  const report = (rows: { ok: boolean; clip_id: number; problems: string[]; error: string | null }[]) => {
+    const failed = rows.filter((r) => !r.ok);
+    setResult(
+      failed.length
+        ? `${rows.length - failed.length}건 처리, ${failed.length}건 실패: ` +
+            failed.map((r) => `#${clips.find((c) => c.id === r.clip_id)?.item_no} ${r.problems.join("·") || r.error}`).join(" / ")
+        : `${rows.length}건 처리했습니다`,
+    );
+  };
+  return (
+    <div className="bulk-bar small">
+      <button
+        className="btn btn-small"
+        disabled={!reviewable.length || bulk.isPending}
+        onClick={() => bulk.mutateAsync({ clip_ids: reviewable.map((c) => c.id), action: "approve" }).then(report, (e: Error) => setResult(e.message))}
+      >
+        검수 전 {reviewable.length}건 일괄 승인
+      </button>
+      <span>
+        순차 예약 <input type="datetime-local" value={first} onChange={(e) => setFirst(e.target.value)} /> 부터{" "}
+        <input type="number" min={1} value={interval} onChange={(e) => setInterval_(Number(e.target.value))} style={{ width: "4em" }} />분 간격{" "}
+        <button
+          className="btn btn-small"
+          disabled={!first || !ids.length || bulk.isPending}
+          onClick={() =>
+            bulk
+              .mutateAsync({ clip_ids: ids, action: "schedule", first_at: `${first}:00+09:00`, interval_minutes: interval, privacy: "public" })
+              .then(report, (e: Error) => setResult(e.message))
+          }
+        >
+          {ids.length}건 예약
+        </button>
+      </span>
+      {result && <div>{result}</div>}
     </div>
   );
 }

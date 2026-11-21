@@ -1,9 +1,11 @@
 import { Fragment, useState } from "react";
+import { Link } from "react-router-dom";
 
 import { isActive } from "../api/jobs";
 import { useJobRundown, useRefreshRundown } from "../api/newsroom";
+import { useClipList } from "../api/review";
 import type { JobDetail, RundownChange, RundownItem } from "../api/types";
-import { CLIP_FLAG_LABEL, ITEM_TYPE_LABEL, SENTENCE_KIND_LABEL, formatDateTime, formatMinSec, timecode } from "../labels";
+import { CLIP_FLAG_LABEL, CLIP_STATUS_LABEL, ITEM_TYPE_LABEL, SENTENCE_KIND_LABEL, formatDateTime, formatMinSec, timecode } from "../labels";
 import { RundownPreview } from "./RundownPreview";
 
 /** The job's cue sheet: waiting state with a manual re-check, or the parsed items. */
@@ -82,7 +84,7 @@ export function RundownPanel({ job }: { job: JobDetail }) {
             </ul>
           )}
           {rundown.data.changes.length > 0 && <Changes changes={rundown.data.changes} />}
-          <ItemTable items={rundown.data.items} fps={job.fps} />
+          <ItemTable items={rundown.data.items} fps={job.fps} jobId={job.id} />
         </>
       )}
     </div>
@@ -110,7 +112,9 @@ function Changes({ changes }: { changes: RundownChange[] }) {
   );
 }
 
-function ItemTable({ items, fps }: { items: RundownItem[]; fps: number | null }) {
+function ItemTable({ items, fps, jobId }: { items: RundownItem[]; fps: number | null; jobId: number }) {
+  const clips = useClipList(jobId);
+  const clipOf = new Map((clips.data ?? []).map((c) => [c.rundown_item_id, c]));
   const [open, setOpen] = useState<number | null>(null);
   return (
     <table className="table rundown-table">
@@ -125,6 +129,7 @@ function ItemTable({ items, fps }: { items: RundownItem[]; fps: number | null })
           <th>추정</th>
           <th>업로드</th>
           <th>녹화본 위치</th>
+          <th>검수</th>
         </tr>
       </thead>
       <tbody>
@@ -169,10 +174,19 @@ function ItemTable({ items, fps }: { items: RundownItem[]; fps: number | null })
                   </span>
                 ))}
               </td>
+              <td className="small">
+                {clipOf.get(it.id) ? (
+                  <Link to={`/jobs/${jobId}/clips/${clipOf.get(it.id)!.id}`}>
+                    {CLIP_STATUS_LABEL[clipOf.get(it.id)!.status] ?? clipOf.get(it.id)!.status}
+                  </Link>
+                ) : (
+                  "—"
+                )}
+              </td>
             </tr>
             {open === it.id && (
               <tr>
-                <td colSpan={9}>
+                <td colSpan={10}>
                   <Script item={it} />
                 </td>
               </tr>
