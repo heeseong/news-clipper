@@ -58,12 +58,39 @@ def _done(db, clip: Clip, *, rerender: bool = False) -> ClipDetailOut:
     return clip_detail(clip)
 
 
+def _done_and_push(db, clip: Clip, pushes: list[int]) -> ClipDetailOut:
+    """The thumbnail is rendered and committed first, then the platform gets it."""
+    out = _done(db, clip, rerender=True)
+    if pushes:
+        _push_remote(pushes)
+        db.expire_all()
+        out = clip_detail(_clip(db, clip.id))
+    return out
+
+
 def _queue_render(clip_ids: list[int]) -> None:
     """Final render on the media queue (M6). Runs after the approval is committed."""
     from app.pipeline.tasks import render_clip
 
     for clip_id in clip_ids:
         render_clip.apply_async(args=(clip_id,), queue="media")
+
+
+def _mark_remote(db, clip: Clip, *, fields=(), thumbnail: bool = False) -> list[int]:
+    """Edits of an uploaded clip go to the platform (M8.3). Call before the commit; dispatch the
+    returned task ids after it (_push_remote)."""
+    from app.publish.service import SYNC_FIELDS, UPLOAD_STATES, mark_sync
+
+    if clip.status not in UPLOAD_STATES or not (thumbnail or set(fields) & SYNC_FIELDS):
+        return []
+    return mark_sync(db, clip, thumbnail=thumbnail)
+
+
+def _push_remote(task_ids: list[int]) -> None:
+    if task_ids:
+        from app.publish.service import dispatch_sync
+
+        dispatch_sync(task_ids)
 
 
 def _prepare_after_range(clip_id: int) -> None:
@@ -84,12 +111,19 @@ def patch_clip(clip_id: int, body: ClipPatchIn, db: DbSession, user: Reviewer) -
     if body.clear_publish_at:
         fields["publish_at"] = None
     rerender = False
+    pushes: list[int] = []
     if fields:
-        meta = _run(review.update_metadata, db, clip, user, fields)
+        diff: dict = {}
+        meta = _run(review.update_metadata, db, clip, user, fields, diff)
         rerender = "thumbnail_text" in fields and meta is not None
+        pushes = _mark_remote(db, clip, fields=diff, thumbnail="thumbnail_text" in diff)
     if body.warnings_acknowledged is not None:
         _run(review.acknowledge, db, clip, user, body.warnings_acknowledged)
     out = _done(db, clip, rerender=rerender)
+    if pushes:
+        _push_remote(pushes)
+        db.expire_all()
+        out = clip_detail(_clip(db, clip_id))
     if range_change and range_change.changed:
         _prepare_after_range(clip.id)  # new thumbnail candidates (and metadata for a new clip)
         db.expire_all()
@@ -158,8 +192,9 @@ def reopen_clip(clip_id: int, db: DbSession, user: Reviewer) -> ClipDetailOut:
 @router.post("/clips/{clip_id}/thumbnails/{thumbnail_id}/select", response_model=ClipDetailOut)
 def select_thumbnail(clip_id: int, thumbnail_id: int, db: DbSession, user: Reviewer) -> ClipDetailOut:
     clip = _clip(db, clip_id)
+    before = next((t.id for t in clip.thumbnails if t.selected), None)
     _run(review.select_thumbnail, db, clip, user, thumbnail_id)
-    return _done(db, clip, rerender=True)
+    return _done_and_push(db, clip, _mark_remote(db, clip, thumbnail=True) if before != thumbnail_id else [])
 
 
 @router.post("/clips/{clip_id}/thumbnails", response_model=ClipDetailOut)
@@ -180,7 +215,7 @@ def add_frame_thumbnail(clip_id: int, body: FrameThumbnailIn, db: DbSession, use
     except (FfmpegError, FileNotFoundError) as e:
         raise HTTPException(status.HTTP_409_CONFLICT, f"프레임을 뽑지 못했습니다: {e}") from e
     _run(review.add_thumbnail, db, clip, user, str(out), "frame", round(body.frame_sec, 3))
-    return _done(db, clip, rerender=True)
+    return _done_and_push(db, clip, _mark_remote(db, clip, thumbnail=True))
 
 
 @router.put("/clips/{clip_id}/thumbnails/upload", response_model=ClipDetailOut)
@@ -198,7 +233,7 @@ async def upload_thumbnail(clip_id: int, request: Request, db: DbSession, user: 
     except (UnidentifiedImageError, OSError) as e:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "이미지를 읽을 수 없습니다") from e
     _run(review.add_thumbnail, db, clip, user, str(out), "upload", None)
-    return _done(db, clip, rerender=True)
+    return _done_and_push(db, clip, _mark_remote(db, clip, thumbnail=True))
 
 
 @router.get("/clips/{clip_id}/thumbnail-preview")
@@ -250,7 +285,9 @@ def bulk(body: BulkIn, db: DbSession, user: Reviewer) -> list[BulkResultOut]:
         for clip, at in zip(clips, times, strict=True):
             changes = {"publish_at": at} | ({"privacy": body.privacy} if body.privacy else {})
             try:
-                review.update_metadata(db, clip, user, changes)
+                diff: dict = {}
+                review.update_metadata(db, clip, user, changes, diff)
+                uploads.extend(_mark_remote(db, clip, fields=diff))  # uploaded clips: push the new time
                 results.append(BulkResultOut(clip_id=clip.id, ok=True, publish_at=at))
             except review.ReviewError as e:
                 results.append(BulkResultOut(clip_id=clip.id, ok=False, error=str(e)))
@@ -283,9 +320,9 @@ def bulk(body: BulkIn, db: DbSession, user: Reviewer) -> list[BulkResultOut]:
         publish_job_changed(job_id)
     _queue_render(approved)
     if uploads:
-        from app.publish.service import dispatch
+        from app.publish.service import dispatch, dispatch_sync
 
-        dispatch(uploads)
+        (dispatch_sync if body.action == "schedule" else dispatch)(uploads)
     return results
 
 

@@ -6,7 +6,19 @@ from datetime import date, datetime
 from enum import StrEnum
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, Date, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import Base
@@ -114,6 +126,23 @@ class PublishTask(TimestampMixin, Base):
     uploaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     quota_units: Mapped[int] = mapped_column(Integer, default=0)
+    # M8.1 status checks: next time to ask the platform (1 → 2 → 4 → 8 → 10 min, a few times after
+    # publication), and how many checks since the status last changed.
+    next_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    check_count: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    # M8.2 thumbnail retries (transient errors only)
+    thumbnail_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    thumbnail_next_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # M8.3 metadata edits after the upload, pushed to the platform (videos.update). sync_version
+    # counts edits; a sync that finishes on an older version leaves the task pending.
+    sync_status: Mapped[str | None] = mapped_column(String(16))  # pending | syncing | ok | failed
+    sync_version: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    synced_version: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    sync_thumbnail: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    sync_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    sync_next_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sync_error: Mapped[str | None] = mapped_column(Text)
+    synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
 
     channel: Mapped[Channel] = relationship()

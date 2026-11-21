@@ -70,6 +70,11 @@ class PublishTaskOut(BaseModel):
     checked_at: datetime | None
     uploaded_at: datetime | None
     published_at: datetime | None
+    next_check_at: datetime | None = None
+    thumbnail_next_at: datetime | None = None
+    sync_status: str | None = None  # pending | syncing | ok | failed (edits after the upload)
+    sync_error: str | None = None
+    synced_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
     # Dashboard rows

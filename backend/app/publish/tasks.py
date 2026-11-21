@@ -22,6 +22,11 @@ def check(task_id: int) -> str:
     return service.check_status(task_id)
 
 
+@celery_app.task(name="publish.sync")
+def sync(task_id: int) -> str:
+    return service.run_sync(task_id)
+
+
 @celery_app.task(name="publish.sweep")
 def sweep() -> dict[str, int]:
     return service.sweep()

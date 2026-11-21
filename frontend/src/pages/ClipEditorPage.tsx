@@ -28,6 +28,8 @@ const EDITABLE = ["DRAFT", "NOT_FOUND"];
 const REOPENABLE = ["APPROVED", "RENDERING", "RENDERED", "REJECTED", "UPLOAD_FAILED"];
 // Publishing settings (channels, visibility, schedule) can change until the upload starts.
 const PUBLISH_EDITABLE = [...EDITABLE, "APPROVED", "RENDERING", "RENDERED", "UPLOAD_FAILED"];
+// Uploaded (or on its way): metadata and thumbnail edits are pushed to YouTube (M8). Not the range.
+const UPLOADED = ["UPLOADING", "UPLOADED", "PROCESSING", "SCHEDULED", "PUBLISHED", "UPLOAD_FAILED"];
 
 const KEYS: [string, string][] = [
   ["Space", "재생/정지"],
@@ -77,8 +79,10 @@ function Editor({ jobId, fps, duration, clip, clips }: { jobId: number; fps: num
   const [loop, setLoop] = useState<[number, number] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const editable = EDITABLE.includes(clip.status);
-  const holder = useClipLock(clip.id, editable);
+  const uploaded = UPLOADED.includes(clip.status);
+  const holder = useClipLock(clip.id, editable || uploaded);
   const readOnly = !editable || !!holder;
+  const metaReadOnly = !(editable || uploaded) || !!holder;
 
   const analysis = useAnalysis(jobId, "editor");
   const waveform = useWaveform(jobId);
@@ -305,9 +309,19 @@ function Editor({ jobId, fps, duration, clip, clips }: { jobId: number; fps: num
         </section>
 
         <section className="editor-right">
-          <ThumbnailPanel clip={clip} readOnly={readOnly} currentTime={t} run={run} />
+          <ThumbnailPanel clip={clip} readOnly={metaReadOnly} currentTime={t} run={run} />
           {clip.metadata ? (
-            <MetadataForm key={clip.metadata.generated_at ?? ""} clip={clip} meta={clip.metadata} readOnly={readOnly} publishEditable={PUBLISH_EDITABLE.includes(clip.status) && !holder} save={(p) => run(patch.mutateAsync(p))} saving={patch.isPending} />
+            <MetadataForm
+              key={clip.metadata.generated_at ?? ""}
+              clip={clip}
+              meta={clip.metadata}
+              readOnly={metaReadOnly}
+              publishEditable={(PUBLISH_EDITABLE.includes(clip.status) || uploaded) && !holder}
+              channelsEditable={PUBLISH_EDITABLE.includes(clip.status) && !holder}
+              uploaded={uploaded}
+              save={(p) => run(patch.mutateAsync(p))}
+              saving={patch.isPending}
+            />
           ) : (
             <p className="muted small">메타데이터는 구간을 정하면 만들어집니다.</p>
           )}
@@ -457,7 +471,9 @@ function splitList(v: string): string[] {
   return v.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
 }
 
-function MetadataForm({ clip, meta, readOnly, publishEditable, save, saving }: { clip: ClipDetail; meta: ClipMetadata; readOnly: boolean; publishEditable: boolean; save: (p: ClipPatch) => Promise<void>; saving: boolean }) {
+function MetadataForm({ clip, meta, readOnly, publishEditable, channelsEditable, uploaded, save, saving }: { clip: ClipDetail; meta: ClipMetadata; readOnly: boolean; publishEditable: boolean; channelsEditable: boolean; uploaded: boolean; save: (p: ClipPatch) => Promise<void>; saving: boolean }) {
+  // A video already public keeps the time it went public (the visibility can still change).
+  const scheduleLocked = clip.publish_tasks.some((t) => t.status === "PUBLISHED");
   const channels = useChannels();
   const initial = useMemo(
     () => ({
@@ -574,16 +590,22 @@ function MetadataForm({ clip, meta, readOnly, publishEditable, save, saving }: {
         </label>
         <label>
           예약 (KST, 비우면 처리 후 바로)
-          <input type="datetime-local" value={f.publish_at} onChange={set("publish_at")} disabled={!publishEditable} />
+          <input type="datetime-local" value={f.publish_at} onChange={set("publish_at")} disabled={!publishEditable || scheduleLocked} />
         </label>
       </div>
       <ChannelPicker
         channels={channels.data?.channels ?? []}
         value={f.channel_ids}
-        disabled={!publishEditable}
+        disabled={!channelsEditable}
         onChange={(v) => setF({ ...f, channel_ids: v })}
       />
       {publishOnly && <p className="small muted">승인한 뒤에는 발행 설정(채널·공개·예약)만 바꿀 수 있습니다.</p>}
+      {uploaded && !readOnly && (
+        <p className="small muted">
+          업로드된 클립입니다. 저장하면 YouTube에 자동으로 반영됩니다(썸네일 포함). 채널과 구간은 업로드를 취소해야 바꿀 수 있습니다.
+          {scheduleLocked && " 이미 게시된 영상이라 예약 시각은 바꿀 수 없습니다."}
+        </p>
+      )}
       <button className="btn" type="submit" disabled={!dirty || (readOnly && !publishEditable) || saving}>
         {saving ? "저장 중…" : dirty ? "저장 (Ctrl+S)" : "저장됨"}
       </button>

@@ -97,8 +97,27 @@ function TaskStatus({ task: t }: { task: PublishTask }) {
       {progress != null && <span className="small"> {progress}% ({formatBytes(t.bytes_sent)} / {formatBytes(t.file_size)})</span>}
       {t.status === "QUEUED" && t.next_retry_at && <div className="small muted">다음 시도 {formatDateTime(t.next_retry_at)}</div>}
       {t.last_error && <div className="small error-text">{t.last_error}</div>}
-      {t.thumbnail_status === "failed" && <div className="small warn-text">썸네일 실패: {t.thumbnail_error}</div>}
+      {t.thumbnail_status === "failed" && (
+        <div className="small warn-text">
+          썸네일 실패: {t.thumbnail_error}
+          {t.thumbnail_next_at && <> (다시 시도 {formatDateTime(t.thumbnail_next_at)})</>}
+        </div>
+      )}
+      <SyncStatus task={t} />
     </>
+  );
+}
+
+/** Edits after the upload (M8): pushed to YouTube automatically. */
+function SyncStatus({ task: t }: { task: PublishTask }) {
+  if (!t.sync_status) return null;
+  if (t.sync_status === "ok")
+    return <div className="small muted">수정 사항 YouTube 반영됨 {t.synced_at && formatDateTime(t.synced_at)}</div>;
+  if (t.sync_status === "failed") return <div className="small error-text">수정 사항 반영 실패: {t.sync_error}</div>;
+  return (
+    <div className="small muted">
+      수정 사항을 YouTube에 반영하는 중…{t.sync_error && <span className="warn-text"> ({t.sync_error}, 다시 시도 예정)</span>}
+    </div>
   );
 }
 
@@ -106,9 +125,9 @@ function TaskActions({ task: t }: { task: PublishTask }) {
   const { run, busy } = useTaskRun(t);
   return (
     <span className="small nowrap">
-      {(t.status === "FAILED" || (t.status === "QUEUED" && t.next_retry_at) || t.thumbnail_status === "failed") && (
+      {(t.status === "FAILED" || (t.status === "QUEUED" && t.next_retry_at) || t.thumbnail_status === "failed" || t.sync_status === "failed") && (
         <button className="link" disabled={busy} onClick={() => run("retry")}>
-          {t.status === "FAILED" || t.status === "QUEUED" ? "다시 시도" : "썸네일 다시"}
+          {t.status === "FAILED" || t.status === "QUEUED" ? "다시 시도" : t.sync_status === "failed" ? "다시 반영" : "썸네일 다시"}
         </button>
       )}{" "}
       {t.remote_id && !["CANCELLED", "UPLOADING"].includes(t.status) && (

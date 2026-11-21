@@ -104,6 +104,15 @@ test("upload a recording, set a clip's range, fill in the review, approve it and
 
   // The editor shows the upload; the dashboard lists it.
   await expect(page.locator(".publish-box .task-card")).toContainText("예약됨");
+  // M8: an edit after the upload is pushed to the platform automatically.
+  const uploadedTitle = page.locator(".meta-form input").first();
+  await expect(uploadedTitle).toBeEnabled();
+  await uploadedTitle.fill("업로드 뒤 고친 제목[목포MBC 뉴스데스크]");
+  await page.keyboard.press("Control+s");
+  await expect(page.locator(".publish-box .task-card")).toContainText("YouTube 반영됨", { timeout: 30_000 });
+  const synced = await (await request.get(`${API}/api/clips/${clip.id}`)).json();
+  expect(synced.publish_tasks[0].sync_status).toBe("ok");
+  expect(synced.metadata.title).toBe("업로드 뒤 고친 제목[목포MBC 뉴스데스크]");
   const shots = process.env.E2E_SCREENSHOTS;
   if (shots) await page.screenshot({ path: `${shots}/editor.png`, fullPage: true });
   await page.goto("/publish");

@@ -18,6 +18,7 @@ export function useClipDetail(id: number) {
       if (!c) return false;
       if (["APPROVED", "RENDERING"].includes(c.status) && !c.render_error) return 2000;
       if (["UPLOADING", "UPLOADED", "PROCESSING"].includes(c.status)) return 3000;
+      if (c.publish_tasks?.some((t) => t.sync_status === "pending" || t.sync_status === "syncing")) return 2000;
       if (c.status === "SCHEDULED") return 60_000;
       return false;
     },

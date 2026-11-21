@@ -76,14 +76,14 @@ def test_approve_render_upload_schedule_then_published(reviewed, client, channel
     assert video["publish_at"].startswith("2030-01-01T09:00") and video["category_id"] == "25" and video["language"] == "ko"
     # As reviewed, with the hashtags at the end (2026-11-21).
     assert video["description"] == meta["description"] + "\n\n" + " ".join(meta["hashtags"])
-    # Uploaded: no reopening, no changing the schedule (cancel first).
+    # Uploaded: no reopening (cancel first); the channels stay, other edits go to the platform (M8).
     assert client.post(f"/api/clips/{cid}/reopen", headers=A).status_code == 409
-    r = client.patch(f"/api/clips/{cid}", json={"privacy": "private"}, headers=A)
-    assert r.status_code == 409 and "업로드" in r.json()["detail"]
+    r = client.patch(f"/api/clips/{cid}", json={"channel_ids": []}, headers=A)
+    assert r.status_code == 409 and "채널" in r.json()["detail"]
     counts = client.get("/api/jobs").json()["items"][0]["clip_counts"]
     assert counts["approved"] == 1 and counts["uploaded"] == 1
     # The sweep checks the video once publish_at has passed: the platform made it public.
-    assert svc.sweep(now=LATER - timedelta(hours=1)) == {"uploads": 0, "checks": 0}  # processed, not due yet
+    assert svc.sweep(now=LATER - timedelta(hours=1))["checks"] == 0  # processed: next look at publish_at
     with session_scope() as s:
         s.get(PublishTask, t["id"]).checked_at = None
     factory.set_publisher(lambda ch: FakePublisher(ch.remote_channel_id, now=lambda: LATER + timedelta(minutes=1)))

@@ -124,6 +124,8 @@ def retry(task_id: int, db: DbSession, user: Reviewer) -> PublishTaskOut:
         svc.dispatch([t.id])
     elif what == "thumbnail":
         svc.dispatch_thumbnail(t.id)
+    elif what == "sync":
+        svc.dispatch_sync([t.id])
     else:
         svc.check_status(t.id)
     db.expire_all()

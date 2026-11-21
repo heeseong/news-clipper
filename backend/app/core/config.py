@@ -101,6 +101,7 @@ class Settings(BaseSettings):
     youtube_quota_insert: int = 1600
     youtube_quota_thumbnail: int = 50
     youtube_quota_delete: int = 50
+    youtube_quota_update: int = 50  # videos.update (edits after the upload, M8)
     youtube_chunk_mb: int = 16  # resumable upload chunk (a multiple of 8 MB)
     youtube_category_id: str = "25"  # News & Politics
     youtube_language: str = "ko"

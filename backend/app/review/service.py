@@ -27,8 +27,12 @@ UPLOAD_STATES = (ClipStatus.UPLOADING, ClipStatus.UPLOADED, ClipStatus.PROCESSIN
                  ClipStatus.PUBLISHED, ClipStatus.UPLOAD_FAILED)  # fmt: skip
 REVIEWED = (ClipStatus.APPROVED, ClipStatus.REJECTED, ClipStatus.RENDERING, ClipStatus.RENDERED, *UPLOAD_STATES)
 APPROVED_STATES = (ClipStatus.APPROVED, ClipStatus.RENDERING, ClipStatus.RENDERED)
-# Publishing settings can change until the upload starts (afterwards: cancel the upload first).
+# Publishing settings can change until the upload starts; the channels only until then.
 PUBLISH_EDITABLE = (*APPROVED_STATES, ClipStatus.UPLOAD_FAILED)
+# Uploaded clips: metadata and thumbnail edits are pushed to the platform (M8.3, 2026-11-21).
+# The range cannot change (the video would) — cancel the upload and reopen for that.
+REMOTE_EDITABLE = UPLOAD_STATES
+SCHEDULE_MARGIN = timedelta(minutes=2)
 # Editable states (later states belong to rendering and publishing, M6/M7).
 EDITABLE = (ClipStatus.DRAFT, ClipStatus.NOT_FOUND)
 
@@ -105,10 +109,26 @@ def release_lock(session: Session, clip: Clip, user: User) -> None:
 # --- edits ---
 
 
-def _editable(clip: Clip, user: User) -> None:
+def _editable(clip: Clip, user: User, *, uploaded_ok: bool = False) -> None:
     check_lock(clip, user)
-    if clip.status not in EDITABLE:
-        raise ReviewError("승인·반려된 클립은 먼저 다시 열어야 고칠 수 있습니다")
+    if clip.status in EDITABLE or (uploaded_ok and clip.status in REMOTE_EDITABLE):
+        return
+    raise ReviewError("승인·반려된 클립은 먼저 다시 열어야 고칠 수 있습니다")
+
+
+def _check_remote_schedule(session: Session, clip: Clip, meta: ClipMetadata, value: datetime | None) -> None:
+    """A new publish time for an uploaded clip (M8.3)."""
+    from app.models import PublishStatus, PublishTask
+
+    if _aware(meta.publish_at) == (_aware(value) if value else None):
+        return
+    published = session.scalar(
+        select(PublishTask.id).where(PublishTask.clip_id == clip.id, PublishTask.status == PublishStatus.PUBLISHED)
+    )
+    if published:
+        raise ReviewError("이미 게시된 영상은 예약 시각을 바꿀 수 없습니다 (공개 설정은 바꿀 수 있습니다)")
+    if value is not None and _aware(value) <= utcnow() + SCHEDULE_MARGIN:
+        raise ReviewError("예약 시각은 지금부터 2분 뒤 이후여야 합니다")
 
 
 def _touch(clip: Clip, user: User) -> None:
@@ -151,16 +171,24 @@ METADATA_FIELDS = ("title", "description", "tags", "hashtags", "thumbnail_text",
 PUBLISH_FIELDS = {"privacy", "publish_at", "channel_ids"}  # do not change the render
 
 
-def update_metadata(session: Session, clip: Clip, user: User, changes: dict[str, Any]) -> ClipMetadata:
-    if set(changes) <= PUBLISH_FIELDS and clip.status in PUBLISH_EDITABLE:
+def update_metadata(session: Session, clip: Clip, user: User, changes: dict[str, Any],
+                    diff_out: dict[str, Any] | None = None) -> ClipMetadata:  # fmt: skip
+    """`diff_out` receives {field: [before, after]} of what changed."""
+    if clip.status in REMOTE_EDITABLE:  # uploaded (or on its way): pushed to the platform (M8.3)
+        check_lock(clip, user)
+        if "channel_ids" in changes and clip.status not in PUBLISH_EDITABLE:
+            current = session.get(ClipMetadata, clip.id)
+            if current is None or list(changes["channel_ids"] or []) != list(current.channel_ids or []):
+                raise ReviewError("업로드가 시작된 뒤에는 채널을 바꿀 수 없습니다 (업로드를 취소한 뒤 바꾸세요)")
+    elif set(changes) <= PUBLISH_FIELDS and clip.status in PUBLISH_EDITABLE:
         check_lock(clip, user)  # publishing settings can still change after approval
-    elif set(changes) <= PUBLISH_FIELDS and clip.status in UPLOAD_STATES:
-        raise ReviewError("업로드가 시작된 뒤에는 발행 설정을 바꿀 수 없습니다 (업로드를 취소한 뒤 바꾸세요)")
     else:
         _editable(clip, user)
     meta = session.get(ClipMetadata, clip.id)
     if meta is None:
         raise ReviewError("메타데이터가 아직 없습니다 (구간을 정하면 만들어집니다)")
+    if clip.status in REMOTE_EDITABLE and "publish_at" in changes:
+        _check_remote_schedule(session, clip, meta, changes["publish_at"])
     if "privacy" in changes and changes["privacy"] not in PRIVACY:
         raise ReviewError(f"공개 설정은 {', '.join(PRIVACY)} 중 하나입니다")
     if "title" in changes:
@@ -190,6 +218,8 @@ def update_metadata(session: Session, clip: Clip, user: User, changes: dict[str,
         if old != value:
             diff[key] = [_jsonable(old), _jsonable(value)]
             setattr(meta, key, value)
+    if diff_out is not None:
+        diff_out.update(diff)
     if diff:
         _touch(clip, user)
         audit(session, user, clip, "metadata", diff)
@@ -202,7 +232,7 @@ def _jsonable(v: Any) -> Any:
 
 
 def select_thumbnail(session: Session, clip: Clip, user: User, thumbnail_id: int) -> Thumbnail:
-    _editable(clip, user)
+    _editable(clip, user, uploaded_ok=True)
     thumbs = list(session.scalars(select(Thumbnail).where(Thumbnail.clip_id == clip.id)))
     chosen = next((t for t in thumbs if t.id == thumbnail_id), None)
     if chosen is None:
@@ -221,7 +251,7 @@ def add_thumbnail(
     session: Session, clip: Clip, user: User, path: str, source: str, frame_sec: float | None
 ) -> Thumbnail:
     """A frame the reviewer picked or an uploaded image; it becomes the selected one."""
-    _editable(clip, user)
+    _editable(clip, user, uploaded_ok=True)
     for t in session.scalars(select(Thumbnail).where(Thumbnail.clip_id == clip.id)):
         t.selected = False
     thumb = Thumbnail(clip_id=clip.id, source=source, rank=0, frame_sec=frame_sec, path=path, selected=True)

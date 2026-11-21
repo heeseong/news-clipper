@@ -50,6 +50,11 @@ SCHEDULE_MARGIN = timedelta(minutes=2)  # publishAt must still be in the future 
 PUBLISH_LATE = timedelta(minutes=15)  # scheduled but still private this long after publish_at → failed
 STALE_UPLOAD = timedelta(minutes=10)  # UPLOADING without progress: the worker died
 LOST_DISPATCH = timedelta(minutes=2)
+CHECK_STEPS_MIN = (1, 2, 4, 8, 10)  # status checks while the platform works (M8.1)
+AFTER_PUBLISH_MIN = (10, 60, 360, 1440)  # a few more after publication: rejected or removed?
+THUMBNAIL_RETRY_MIN = (2, 10, 30)  # transient thumbnail errors (M8.2)
+STALE_SYNC = timedelta(minutes=10)
+WATCHED = (PublishStatus.UPLOADED, PublishStatus.PROCESSING, PublishStatus.SCHEDULED, PublishStatus.PUBLISHED)
 
 CLIP_FOR_TASK = {
     PublishStatus.QUEUED: ClipStatus.UPLOADING,
@@ -278,9 +283,13 @@ def run_upload(task_id: int, now: datetime | None = None) -> str:
         t.last_error = t.error_kind = None
         if result.status is not None:
             apply_remote(t, result.status, now)
+        schedule_next_check(t, now, changed=True)
+        sync_waiting = t.sync_status == "pending"  # edited while uploading (M8.3)
         _finish_change(s, t)
     log.info("upload finished", extra={"task_id": task_id, "remote_id": result.remote_id})
-    set_thumbnail(task_id, publisher)
+    set_thumbnail(task_id, publisher, now=now, charge=False)
+    if sync_waiting:
+        dispatch_sync([task_id])
     publish_job_changed(job.job_id)
     return "uploaded"
 
@@ -320,8 +329,10 @@ def _upload_failed(task_id: int, e: PublishError, now: datetime) -> str:
     return outcome
 
 
-def set_thumbnail(task_id: int, publisher=None) -> str:
-    """thumbnails.set; a failure keeps the video and only marks the thumbnail (spec 5.10)."""
+def set_thumbnail(task_id: int, publisher=None, now: datetime | None = None, *, charge: bool = True) -> str:
+    """thumbnails.set; a failure keeps the video and only marks the thumbnail (spec 5.10).
+    Transient errors are tried again by the sweep (2, 10, 30 minutes later, M8.2)."""
+    now = now or utcnow()
     with session_scope() as s:
         t = s.get(PublishTask, task_id)
         if t is None or not t.remote_id:
@@ -329,6 +340,7 @@ def set_thumbnail(task_id: int, publisher=None) -> str:
         image = JobFiles(s.get(Clip, t.clip_id).job_id).thumbnail(t.clip_id)
         ch = t.channel
         remote_id = t.remote_id
+    retryable = False
     if not image.exists():
         outcome, error = "none", "썸네일 파일이 없습니다"
     else:
@@ -336,12 +348,19 @@ def set_thumbnail(task_id: int, publisher=None) -> str:
             (publisher or publisher_for(ch)).set_thumbnail(remote_id, image)
             outcome, error = "ok", None
         except PublishError as e:
-            outcome, error = "failed", str(e)
+            outcome, error, retryable = "failed", str(e), e.retryable
             if e.reason in ("forbidden",) or "custom" in str(e).lower():
                 error += " (채널에서 맞춤 썸네일을 쓰려면 YouTube 전화번호 인증이 필요할 수 있습니다)"
     with session_scope() as s:
         t = s.get(PublishTask, task_id)
-        t.thumbnail_status, t.thumbnail_error = outcome, error
+        t.thumbnail_status, t.thumbnail_error, t.thumbnail_next_at = outcome, error, None
+        if outcome == "ok":
+            t.thumbnail_attempts = 0
+            if charge and ch.platform == "youtube":  # the upload already reserved its first thumbnail
+                quota.add(s, ch.platform, get_settings().youtube_quota_thumbnail, now)
+        elif retryable and t.thumbnail_attempts < len(THUMBNAIL_RETRY_MIN):
+            t.thumbnail_next_at = now + timedelta(minutes=THUMBNAIL_RETRY_MIN[t.thumbnail_attempts])
+            t.thumbnail_attempts += 1
     return outcome
 
 
@@ -378,6 +397,26 @@ def apply_remote(t: PublishTask, st: RemoteStatus, now: datetime) -> None:
     return None
 
 
+def _next_check(t: PublishTask, now: datetime) -> datetime | None:
+    """When to ask the platform again (M8.1): 1, 2, 4, 8, then every 10 minutes while it works;
+    at publish_at for a processed scheduled video; 10 min, 1 h, 6 h, 24 h after publication."""
+    if t.status == PublishStatus.PUBLISHED:
+        base = _aware(t.published_at) or now
+        return next((base + timedelta(minutes=m) for m in AFTER_PUBLISH_MIN if base + timedelta(minutes=m) > now), None)
+    if t.status not in WATCHED or not t.remote_id:
+        return None
+    publish_at = _aware(t.publish_at)
+    processed = (t.remote_status or {}).get("upload_status") == "processed"
+    if t.status == PublishStatus.SCHEDULED and processed and publish_at is not None and publish_at > now:
+        return publish_at + timedelta(minutes=1)
+    return now + timedelta(minutes=CHECK_STEPS_MIN[min(t.check_count, len(CHECK_STEPS_MIN) - 1)])
+
+
+def schedule_next_check(t: PublishTask, now: datetime, *, changed: bool) -> None:
+    t.check_count = 0 if changed else t.check_count + 1
+    t.next_check_at = _next_check(t, now)
+
+
 def check_status(task_id: int, now: datetime | None = None) -> str:
     now = now or utcnow()
     with session_scope() as s:
@@ -395,12 +434,17 @@ def check_status(task_id: int, now: datetime | None = None) -> str:
             if e.kind == "auth" and ch.status == ChannelStatus.ACTIVE:
                 s.get(Channel, ch.id).status = ChannelStatus.REAUTH_REQUIRED
             t.remote_status = {**(t.remote_status or {}), "check_error": str(e)}
+            if e.kind == "quota":
+                t.next_check_at = quota.next_reset(now) + QUOTA_GRACE
+            else:
+                schedule_next_check(t, now, changed=False)
         return "error"
     with session_scope() as s:
         t = s.get(PublishTask, task_id)
         quota.add(s, ch.platform, 1, now)
         before = t.status
         apply_remote(t, st, now)
+        schedule_next_check(t, now, changed=before != t.status)
         job_id = _finish_change(s, t)
     if before != t.status:
         publish_job_changed(job_id)
@@ -423,12 +467,17 @@ def retry(session: Session, t: PublishTask) -> str:
         _reset_for_retry(t)
         if t.remote_id:  # uploaded, but a check failed (e.g. still private after publish_at): check again
             t.status = PublishStatus.UPLOADED
+            t.next_check_at, t.check_count = utcnow(), 0
             _finish_change(session, t)
             return "check"
         t.status = PublishStatus.QUEUED
         _finish_change(session, t)
         return "upload"
+    if t.remote_id and t.sync_status == "failed":
+        t.sync_status, t.sync_attempts, t.sync_next_at, t.sync_error = "pending", 0, None, None
+        return "sync"
     if t.remote_id and t.thumbnail_status in ("failed", "none"):
+        t.thumbnail_attempts, t.thumbnail_next_at = 0, None
         return "thumbnail"
     if t.status == PublishStatus.QUEUED:  # waiting for a retry time: now
         t.next_retry_at = None
@@ -466,37 +515,159 @@ def cancel_pending(session: Session, clip: Clip) -> None:
 
 
 def sweep(now: datetime | None = None) -> dict[str, int]:
-    """Start uploads whose retry time has come, recover stalled ones, and check remote states."""
+    """Every minute (Celery beat): uploads whose retry time has come, stalled uploads and syncs,
+    status checks that are due (M8.1), thumbnail retries (M8.2) and pending edits (M8.3)."""
     now = now or utcnow()
     with session_scope() as s:
         stale = s.scalars(select(PublishTask).where(
             PublishTask.status == PublishStatus.UPLOADING, PublishTask.updated_at < now - STALE_UPLOAD))  # fmt: skip
         for t in stale:
             t.status, t.last_error = PublishStatus.QUEUED, "업로드가 멈춰 다시 시작합니다 (작업자 재시작?)"
+        for t in s.scalars(select(PublishTask).where(
+                PublishTask.sync_status == "syncing", PublishTask.updated_at < now - STALE_SYNC)):  # fmt: skip
+            t.sync_status = "pending"
         due = list(s.scalars(select(PublishTask.id).where(
             PublishTask.status == PublishStatus.QUEUED,
             or_(PublishTask.next_retry_at <= now,
                 PublishTask.next_retry_at.is_(None) & (PublishTask.updated_at < now - LOST_DISPATCH)),
         )))  # fmt: skip
-        checks = []
-        for t in s.scalars(select(PublishTask).where(PublishTask.status.in_(
-                [PublishStatus.UPLOADED, PublishStatus.PROCESSING, PublishStatus.SCHEDULED]))):  # fmt: skip
-            if _check_due(t, now):
-                checks.append(t.id)
+        checks = list(s.scalars(select(PublishTask.id).where(
+            PublishTask.status.in_(list(WATCHED)), PublishTask.remote_id.is_not(None),
+            or_(PublishTask.next_check_at <= now,
+                # tasks from before M8 have no next check time
+                PublishTask.next_check_at.is_(None) & (PublishTask.status != PublishStatus.PUBLISHED)),
+        )))  # fmt: skip
+        thumbs = list(s.scalars(select(PublishTask.id).where(
+            PublishTask.thumbnail_status == "failed", PublishTask.thumbnail_next_at <= now,
+            PublishTask.status != PublishStatus.CANCELLED)))  # fmt: skip
+        syncs = list(s.scalars(select(PublishTask.id).where(
+            PublishTask.sync_status == "pending", PublishTask.remote_id.is_not(None),
+            PublishTask.status.not_in([PublishStatus.UPLOADING, PublishStatus.CANCELLED]),
+            or_(PublishTask.sync_next_at <= now,
+                PublishTask.sync_next_at.is_(None) & (PublishTask.updated_at < now - LOST_DISPATCH)),
+        )))  # fmt: skip
     dispatch(due)
-    from .tasks import check
+    from .tasks import check, thumbnail
 
     for task_id in checks:
         check.apply_async(args=(task_id,), queue="publish")
-    return {"uploads": len(due), "checks": len(checks)}
+    for task_id in thumbs:
+        thumbnail.apply_async(args=(task_id,), queue="publish")
+    dispatch_sync(syncs)
+    return {"uploads": len(due), "checks": len(checks), "thumbnails": len(thumbs), "syncs": len(syncs)}
 
 
-def _check_due(t: PublishTask, now: datetime) -> bool:
-    checked = _aware(t.checked_at)
-    if t.status in (PublishStatus.UPLOADED, PublishStatus.PROCESSING):
-        return checked is None or now - checked >= timedelta(minutes=2)
-    publish_at = _aware(t.publish_at)
-    if publish_at is not None and now >= publish_at:  # due to go public: look soon after, then every 5 min
-        return checked is None or checked < publish_at or now - checked >= timedelta(minutes=5)
-    processed = (t.remote_status or {}).get("upload_status") == "processed"
-    return not processed and (checked is None or now - checked >= timedelta(minutes=10))
+# --- edits after the upload (M8.3): pushed to the platform automatically ---
+
+SYNC_FIELDS = {"title", "description", "tags", "hashtags", "privacy", "publish_at"}
+
+
+def mark_sync(session: Session, clip: Clip, *, thumbnail: bool = False) -> list[int]:
+    """The reviewer changed the metadata (or the thumbnail) of an uploaded clip: every upload of it
+    gets the change. Returns task ids to sync now; an upload in progress syncs when it finishes,
+    a queued one simply uploads the new metadata."""
+    meta = session.get(ClipMetadata, clip.id)
+    now_ids = []
+    for t in current_tasks(session, clip.id):
+        if t.status == PublishStatus.QUEUED and not t.remote_id and meta is not None:
+            t.privacy, t.publish_at = meta.privacy, _aware(meta.publish_at)
+            continue
+        if not t.remote_id and t.status != PublishStatus.UPLOADING:
+            continue
+        if t.status == PublishStatus.FAILED and t.error_kind == "remote":
+            continue  # rejected or removed on the platform: a retry uploads a new video
+        t.sync_version += 1
+        t.sync_status, t.sync_attempts, t.sync_next_at, t.sync_error = "pending", 0, None, None
+        t.sync_thumbnail = t.sync_thumbnail or thumbnail
+        if t.remote_id and t.status != PublishStatus.UPLOADING:
+            now_ids.append(t.id)
+    session.flush()
+    return now_ids
+
+
+def dispatch_sync(task_ids: list[int]) -> None:
+    from .tasks import sync
+
+    for task_id in task_ids:
+        sync.apply_async(args=(task_id,), queue="publish")
+
+
+def run_sync(task_id: int, now: datetime | None = None) -> str:
+    """videos.update with the clip's current metadata (and thumbnails.set when it changed)."""
+    from sqlalchemy import update
+
+    now = now or utcnow()
+    with session_scope() as s:
+        claimed = s.execute(update(PublishTask).where(PublishTask.id == task_id, PublishTask.sync_status == "pending")
+                            .values(sync_status="syncing", updated_at=now)).rowcount  # fmt: skip
+    if not claimed:
+        return "skipped"
+    with session_scope() as s:
+        t = s.get(PublishTask, task_id)
+        meta = s.get(ClipMetadata, t.clip_id)
+        ch = t.channel
+        if not t.remote_id or t.status in (PublishStatus.UPLOADING, PublishStatus.CANCELLED) or meta is None:
+            t.sync_status = "pending" if t.status == PublishStatus.UPLOADING else None
+            return "skipped"
+        if ch.status != ChannelStatus.ACTIVE:
+            t.sync_status, t.sync_error = "failed", "채널을 다시 연결해야 YouTube에 반영할 수 있습니다"
+            return "failed"
+        version, thumb, remote_id = t.sync_version, t.sync_thumbnail, t.remote_id
+        publish_at = _aware(meta.publish_at)
+        if t.status == PublishStatus.PUBLISHED or (publish_at is not None and publish_at <= now + SCHEDULE_MARGIN):
+            publish_at = None  # already public (a past publishAt cannot be sent)
+        pm = publish_meta(meta, meta.privacy, publish_at)
+        pm.publish_at = publish_at
+        job_id = s.get(Clip, t.clip_id).job_id
+    publisher = publisher_for(ch)
+    try:
+        publisher.update(remote_id, pm)
+    except PublishError as e:
+        return _sync_failed(task_id, e, now, job_id)
+    s_ = get_settings()
+    with session_scope() as s:
+        t = s.get(PublishTask, task_id)
+        if ch.platform == "youtube":
+            quota.add(s, ch.platform, s_.youtube_quota_update, now)
+        t.privacy = pm.privacy
+        if pm.publish_at is not None or t.status != PublishStatus.PUBLISHED:
+            t.publish_at = pm.publish_at  # a published video keeps the time it went public
+        t.synced_at, t.synced_version, t.sync_error, t.sync_attempts, t.sync_next_at = now, version, None, 0, None
+        current = t.sync_version == version
+        t.sync_status = "ok" if current else "pending"
+        if current:
+            t.sync_thumbnail = False
+        t.next_check_at, t.check_count = now + timedelta(minutes=1), 0  # see what the platform made of it
+    if thumb:
+        set_thumbnail(task_id, publisher, now=now)
+    log.info("synced", extra={"task_id": task_id, "remote_id": remote_id, "version": version})
+    if not current:
+        dispatch_sync([task_id])
+    publish_job_changed(job_id)
+    return "synced"
+
+
+def _sync_failed(task_id: int, e: PublishError, now: datetime, job_id: int) -> str:
+    s_ = get_settings()
+    with session_scope() as s:
+        t = s.get(PublishTask, task_id)
+        ch = t.channel
+        t.sync_attempts += 1
+        t.sync_error = str(e)
+        if e.kind == "quota":
+            if e.reason != "uploadLimitExceeded":
+                quota.exhaust(s, ch.platform, now)
+            t.sync_status, t.sync_next_at = "pending", quota.next_reset(now) + QUOTA_GRACE
+            outcome = "deferred"
+        elif e.retryable and t.sync_attempts < s_.publish_max_attempts:
+            t.sync_status = "pending"
+            t.sync_next_at = now + timedelta(minutes=BACKOFF_MINUTES[min(t.sync_attempts, len(BACKOFF_MINUTES)) - 1])
+            outcome = "retry"
+        else:
+            if e.kind == "auth" and ch.status == ChannelStatus.ACTIVE:
+                ch.status, ch.last_error = ChannelStatus.REAUTH_REQUIRED, str(e)
+            t.sync_status, t.sync_next_at = "failed", None
+            outcome = "failed"
+    log.warning("sync failed", extra={"task_id": task_id, "kind": e.kind, "error": str(e), "outcome": outcome})
+    publish_job_changed(job_id)
+    return outcome

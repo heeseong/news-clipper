@@ -404,6 +404,11 @@ export interface PublishTask {
   checked_at: string | null;
   uploaded_at: string | null;
   published_at: string | null;
+  next_check_at: string | null;
+  thumbnail_next_at: string | null;
+  sync_status: "pending" | "syncing" | "ok" | "failed" | null;
+  sync_error: string | null;
+  synced_at: string | null;
   created_at: string;
   updated_at: string;
   job_id: number | null;
