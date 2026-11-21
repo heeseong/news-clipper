@@ -437,8 +437,8 @@ news-clipper/
 |---|---|---|
 | 8.1 | 상태 폴링(점진적 간격), processing/rejection 반영 | 1분 sweep의 고정 간격 확인, `apply_remote` 상태 대응. 점진 간격·게시 뒤 거부 확인은 없음 |
 | 8.2 | 오류 유형별 재시도 정책 + 지수 백오프 | 거의 다 됨(spec 5.10 표). 썸네일 자동 재시도, 채널 한도의 실제 초기화 시점은 남음 |
-| 8.3 | 수동 재시도/취소/원격 메타 수정 | 재시도·취소·상태 확인 API와 버튼 있음. 원격 메타 수정(`videos.update`)은 없음 |
-| 8.4 | 웹 알림 + Slack/메일 Webhook(선택) | 없음(SSE는 작업 변경만 알린다) |
+| 8.3 | 수동 재시도/취소/원격 메타 수정 (**자동 반영**, 2026-11-21 결정) | 재시도·취소·상태 확인 API와 버튼 있음. 원격 메타 수정(`videos.update`)은 없음 |
+| 8.4 | ~~웹 알림 + Slack/메일 Webhook~~ → **외부 알림 없음**(2026-11-21 결정). 화면 상태·사유 표시만 다듬는다 | 게시 현황·편집기에 상태·사유 표시 있음 |
 | 8.5 | 장애 주입 테스트(네트워크 끊김, 401, quotaExceeded, 5xx) | 일부 있음(`tests/test_publish.py`, `test_youtube.py`). 시나리오 표로 정리·보강 |
 
 **DoD**: 장애 시나리오별 상태 전이와 재시도가 테스트로 검증된다.
@@ -451,7 +451,7 @@ news-clipper/
 - 업로드 흐름 전체가 `backend/app/publish/service.py`에 있다: `enqueue`(작업 생성) → `run_upload`(`_claim`에서 할당량 예약 → 업로드 → `set_thumbnail`) → 실패는 `_upload_failed`(오류 종류별 처리) → `apply_remote`(원격 상태 → 작업 상태) → `sync_clip`(클립 상태). 상수 `BACKOFF_MINUTES`, `QUOTA_GRACE`, `PUBLISH_LATE`, `STALE_UPLOAD`
 - 주기 작업: `sweep()`(Celery beat 1분, `publish.sweep`)이 재시도 시각이 된 작업, 멈춘 업로드, 상태 확인 대상(`_check_due`, **고정 간격**)을 골라 `publish.upload`/`publish.check`(publish 큐)로 보낸다. 상태 확인은 `check_status()` — `PUBLISHED`가 되면 더 보지 않는다
 - 수동 조작: `retry()`(실패 → 다시, 원격 영상이 있으면 상태만 다시 확인, 썸네일만 실패면 썸네일만), `cancel()`(원격 영상 삭제), API `api/publish.py`(`/api/publish-tasks/{id}/retry|cancel|check`, `/api/clips/{id}/publish`, `/api/publish/summary`). `Publisher.update()`는 YouTube·Fake 모두 구현돼 있지만 **아무 데서도 부르지 않는다**(8.3 원격 수정의 출발점)
-- 발행 설정 잠금: `review/service.py`의 `PUBLISH_EDITABLE`, `update_metadata()` — 업로드가 시작되면 채널·공개 범위·예약을 바꿀 수 없다(409). 8.3에서 "올라간 영상은 `videos.update`로 반영"으로 바꿀지 정할 것. 예약 시각이 지난(게시된) 영상의 `publishAt`은 바꿀 수 없다
+- 발행 설정 잠금: `review/service.py`의 `PUBLISH_EDITABLE`, `update_metadata()` — 업로드가 시작되면 채널·공개 범위·예약을 바꿀 수 없다(409). 승인 뒤 제목·설명 등은 "다시 열기"로만 고칠 수 있는데, 다시 열기는 올라간 영상이 있으면 막힌다 → 8.3에서 풀어야 한다. 예약 시각이 지난(게시된) 영상의 `publishAt`은 바꿀 수 없다
 - 장애 주입: `FakePublisher(fail={"upload": [PublishError(...)], "set_thumbnail": [...]})`, `factory.set_publisher(lambda ch: ...)`로 바꿔 끼운다. YouTube 프로토콜은 `tests/test_youtube.py`의 `FakeYouTube`(httpx MockTransport: 308 Range, 세션 만료, 401, 오류 사유)
 - 알림 기반: `core/events.py`의 Redis pub/sub → SSE(`/api/events`)는 `{"type": "job", "id": …}`만 보낸다. 화면은 `frontend/src/api/events.ts`가 받아 쿼리를 다시 읽는다. 업로드 이벤트 종류(실패, 재연결 필요, 할당량 소진)를 추가하면 웹 알림의 출발점이 된다. 채널 상태는 `Channel.status`(`reauth_required`)와 `last_error`
 - 화면: 게시 현황 `frontend/src/pages/PublishPage.tsx`(`TaskRow`, `TaskCard` — 편집기에서도 씀), 채널 `ChannelsPage.tsx`, 편집기 업로드 칸 `ClipEditorPage.tsx`의 `PublishStatus`
@@ -460,14 +460,13 @@ news-clipper/
 **만들 것 (제안)**
 - 8.1 폴링: 작업별 다음 확인 시각(예: `next_check_at`, 마이그레이션 0012)을 두고 1 → 2 → 4 → 8 → 10분으로 늘린다. `PUBLISHED` 뒤에도 하루 정도 몇 번 확인해 거부·삭제(`rejected`, 영상 없음)를 잡는다. 상태 확인은 1 unit씩 할당량에 센다(지금도 `quota.add(…, 1)`)
 - 8.2 재시도: 썸네일 실패 자동 재시도(2~3회), `uploadLimitExceeded`의 실제 풀리는 시점 확인(태평양 자정인지, 24시간 이동 창인지 — 지금은 자정으로 가정), 오류 종류·다음 시도 시각을 화면에 분명히
-- 8.3 원격 수정: 업로드 뒤 제목·설명·태그·공개 범위·예약을 바꾸면 `videos.update`로 반영(검수 화면에서 "YouTube에 반영"). 실패하면 경고만, 다시 시도 가능. 감사 로그에 남긴다
-- 8.4 알림: 화면 상단 알림(업로드 실패, 채널 다시 연결 필요, 할당량·채널 한도로 미뤄짐, 예약 시각 뒤에도 비공개), 선택적으로 Slack Webhook/메일(설정값, 같은 내용을 한 번만)
+- 8.3 원격 수정 (**자동 반영으로 결정**, 2026-11-21): 업로드된 클립에서 제목·설명·태그·해시태그·공개 범위·예약을 고칠 수 있게 하고(구간·썸네일 프레임은 영상이 바뀌므로 지금처럼 취소 후 다시), 저장하면 publish 큐에서 `videos.update`로 반영한다. 썸네일 문구를 바꾸면 `thumbnails.set`도 다시. 업로드 중이면 끝난 뒤 반영, 반영 실패는 작업에 경고·다시 시도. 게시된 영상의 예약 변경은 막는다. update도 할당량(50 units)에 센다. 감사 로그에 남긴다
+- 8.4 알림: 외부 알림은 만들지 않는다(2026-11-21 결정). 게시 현황에서 실패·재연결 필요·미뤄짐이 눈에 띄게(필터, 건수) 정도만
 - 8.5 장애 주입 테스트: 시나리오 표(네트워크 끊김 → 이어 올리기, 세션 만료 → 처음부터, 401 → 갱신 → 성공/재연결 필요, quotaExceeded → 다음 날, uploadLimitExceeded → 그 채널만, 5xx 5회 → 실패, 썸네일 실패 → 영상 유지, 처리 거부 → 실패·새 영상으로 재시도, 워커 중단 → 멈춘 업로드 재시작)마다 상태 전이를 확인
 
 **사용자에게 받을 것 / 정할 것**
-- 알림 경로(spec 16-8): Slack Webhook URL(받을 때는 채팅이 아니라 설정·비밀로)이나 메일, 받을 사람
-- 업로드 뒤 메타 수정을 YouTube에 자동 반영할지, 버튼으로 할지
-- YouTube 운영 한도(spec 16-7): Cloud 콘솔의 실제 units 사용량(→ `YOUTUBE_QUOTA_INSERT` 조정), 운영 채널의 하루 업로드 개수 한도, 감사·할당량 증설 신청
+- ~~알림 경로~~ → 외부 알림 없음, ~~메타 수정 반영 방식~~ → 자동 반영 (2026-11-21 사용자 결정)
+- YouTube 운영 한도(spec 16-7): 사용자가 나중에 확인한다(Cloud 콘솔의 실제 units 사용량 → `YOUTUBE_QUOTA_INSERT` 조정, 운영 채널의 하루 업로드 개수 한도, 감사·할당량 증설 신청). M8은 지금 설정값으로 진행
 - 테스트 채널에 남은 영상 정리(2026-11-21 테스트: 합성 클립 1건 공개, 11-16 기사 9건 비공개)
 
 **클라우드 세션에서 실제 YouTube로 확인할 때**
@@ -525,5 +524,4 @@ news-clipper/
 - [ ] Anthropic API 키 (M4 실제 호출 확인용, 없으면 원고 기반 기본값으로 진행). 받을 때는 `request_credential`(호스트 `api.anthropic.com`, 헤더 `x-api-key`)
 - [x] YouTube 테스트 채널 + Google Cloud OAuth 클라이언트 (M7, 2026-11-21. "TV 및 입력 제한 기기" 유형)
 - [ ] YouTube API 할당량 증설·감사 신청 — 승인에 수 주가 걸릴 수 있어 **조기 신청**. 신청 전에 Cloud 콘솔의 실제 units 사용량과 운영 채널의 하루 업로드 개수 한도를 확인(spec 16-7)
-- [ ] 알림 경로(Slack Webhook 또는 메일) — M8.4
 - [ ] 정렬 워커용 서버 사양 확인 (CPU 8코어, RAM 16GB 이상 권장)
