@@ -5,7 +5,7 @@
 
 ## 먼저 읽을 것
 - `spec.md` — 기능 명세(v1.0). 정렬·경계 규칙의 근거는 5.5절
-- `plan.md` — 마일스톤과 진행 상태. M0~M4 구현(로그인 보류, M3는 원래 골든셋 4편 재현, M4는 실제 Claude 호출·실제 녹화본 썸네일 확인이 남음). 다음 작업은 **M5(검수 화면)**. 각 마일스톤의 "정한 것"에 규칙이 있다
+- `plan.md` — 마일스톤과 진행 상태. M0~M4 구현(로그인 보류, M3는 원래 골든셋 4편 재현, M4는 실제 Claude 호출·HD 녹화본 확인이 남음). 다음 작업은 **M5(검수 화면)**. 각 마일스톤의 "정한 것"에 규칙이 있다
 - `eval/poc/RESULTS.md` — 정렬 PoC 결과와 방송별 실패 사례
 
 ## 핵심 결정 (바꾸기 전에 사용자와 확인)
@@ -16,11 +16,12 @@
 - 모든 클립은 검수·승인 후 업로드. 정렬 판정에 실패한 기사는 자동으로 자르지 않고 검수자가 직접 지정
 - 스택: Python 3.12 / FastAPI / Celery+Redis / PostgreSQL / FFmpeg, React+Vite+TS, Docker Compose
 - 외부 연동(MARS-L, Claude, YouTube)은 인터페이스 + Fake 구현을 먼저 만든다
-- 메타데이터 기본값은 원고에서, LLM(Claude) 결과는 후보로만(제목 정책 spec 16-5 미정). LLM 실패는 경고만 남기고 단계는 성공. LLM에는 원고 텍스트만 보낸다
+- 메타데이터 기본값은 원고에서, LLM(Claude) 결과는 후보로만. 유튜브 제목은 `원고 제목[목포MBC 뉴스데스크]`(2026-11-21, 프로필 `title_template`). LLM 실패는 경고만 남기고 단계는 성공. LLM에는 원고 텍스트만 보낸다
+- 썸네일: 리포트는 대표 프레임 + 템플릿 이미지(나중에 교체) + 제목 두 줄, 단신은 앵커 샷 뒤 하단 제목 자막이 처음 뜬 화면 그대로(2026-11-20)
 
 ## 저장소 구조 (현재)
 - `backend/app/core/` — 설정(`config.py`, 환경변수), JSON 로깅, DB 세션
-- `backend/app/models/` — SQLAlchemy 모델(User, ProgramProfile, Job, JobStep, Rundown, RundownItem, Clip, AlignedSentence, ClipMetadata, Thumbnail). 바꾸면 Alembic 마이그레이션(`backend/alembic/versions/000N_설명.py`, 현재 0007)도 만든다
+- `backend/app/models/` — SQLAlchemy 모델(User, ProgramProfile, Job, JobStep, Rundown, RundownItem, Clip, AlignedSentence, ClipMetadata, Thumbnail). 바꾸면 Alembic 마이그레이션(`backend/alembic/versions/000N_설명.py`, 현재 0008)도 만든다
 - `backend/app/pipeline/` — 단계 정의(`definition.py`), 상태 전이(`orchestrator.py`, Celery 없음), Celery 태스크(`tasks.py`), 단계 처리기(`handlers.py`, `@register("proxy")`). 처리기가 없는 단계는 SKIPPED
 - `backend/app/media/` — ffprobe·ffmpeg 래퍼(`ffmpeg.py`), 프록시·스프라이트·파형(`proxy.py`), 정렬용 오디오·장면 전환·무음(`analysis.py`)
 - `backend/app/uploads.py`, `api/uploads.py` — tus 업로드. `intake.py` — 업로드 → 작업 생성(ffprobe 검증, 경고). `storage.py` — 저장 경로

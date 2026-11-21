@@ -25,6 +25,8 @@ def _sources(names: list[str]) -> list[str]:
 
 
 def _apply_metadata_settings(program: ProgramProfile, body: ProgramIn) -> None:
+    if body.title_template is not None:
+        program.title_template = body.title_template.strip() or None
     if body.description_footer is not None:
         program.description_footer = body.description_footer.strip() or None
     if body.default_tags is not None:

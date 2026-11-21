@@ -230,7 +230,7 @@ def test_metadata_and_thumbnails_steps(job_with_source, client):
         assert len(ranged) == 3
         for clip in ranged:
             meta = s.get(ClipMetadata, clip.id)
-            assert meta.title == clip.rundown_item.title and meta.llm_status == "ok"
+            assert meta.title == f"{clip.rundown_item.title}[목포MBC 뉴스데스크]" and meta.llm_status == "ok"
             assert meta.llm_provider == "fake"
             thumbs = s.query(Thumbnail).filter_by(clip_id=clip.id).order_by(Thumbnail.rank).all()
             assert 1 <= len(thumbs) <= 6 and [t.rank for t in thumbs] == list(range(1, len(thumbs) + 1))
@@ -247,7 +247,7 @@ def test_metadata_and_thumbnails_steps(job_with_source, client):
         assert best.details["anchor"] == 0.0 and best.frame_sec > lead_end
 
     clip = client.get(f"/api/clips/{report_id}").json()
-    assert clip["metadata"]["title"] == "새 다리 개통"
+    assert clip["metadata"]["title"] == "새 다리 개통[목포MBC 뉴스데스크]"
     assert [c["source"] for c in clip["metadata"]["title_candidates"]][0] == "script"
     assert clip["thumbnail_url"].startswith(f"/media/clips/{report_id}/thumbnail.jpg")
     assert len(clip["thumbnails"]) >= 1
@@ -256,7 +256,7 @@ def test_metadata_and_thumbnails_steps(job_with_source, client):
     r = client.get(clip["thumbnail_url"])
     assert r.status_code == 200 and r.content[:2] == b"\xff\xd8"
     listed = client.get(f"/api/jobs/{job_id}/clips").json()
-    assert listed[0]["youtube_title"] == "새 다리 개통" and listed[0]["thumbnail_url"]
+    assert listed[0]["youtube_title"] == "새 다리 개통[목포MBC 뉴스데스크]" and listed[0]["thumbnail_url"]
     assert client.get(f"/api/clips/{report_id}/thumbnails").json()[0]["rank"] == 1
 
     # 4.6: regenerate (now without LLM) keeps working and replaces the candidates.
@@ -287,10 +287,11 @@ def test_rerunning_align_replaces_metadata_and_files(job_with_source):
 
 def test_program_metadata_settings_api(client):
     r = client.post("/api/programs", json={"name": "뉴스투데이", "default_tags": [" 뉴스 ", "뉴스", ""],
-                                           "description_footer": "{program} {date}",
+                                           "description_footer": "{program} {date}", "title_template": "{title} - {program}",
                                            "thumbnail_template": {"report": {"font_size": 80}}})
     assert r.status_code == 201, r.text
     body = r.json()
+    assert body["title_template"] == "{title} - {program}"
     assert body["default_tags"] == ["뉴스"] and body["thumbnail_template"] == {"report": {"font_size": 80}}
     r = client.put(f"/api/programs/{body['id']}", json={"name": "뉴스투데이", "thumbnail_template": {"colour": 1}})
     assert r.status_code == 422

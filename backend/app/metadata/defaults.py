@@ -1,6 +1,7 @@
 """Script-based metadata (spec 5.7, plan 4.1): what a clip gets without any LLM.
 
-- title: the cleaned script title
+- title: the cleaned script title in the program's title template, by default
+  "{title}[{station} {program}]" → "…원고 제목[목포MBC 뉴스데스크]" like the channel (2026-11-21)
 - description: the anchor lead (a brief: its whole text) + the program's footer template
 - tags: program default tags + reporter + region names found in the script (+ LLM keywords later)
 - thumbnail text: the script memo is always empty in the real API, so the title (see thumbnail_text)
@@ -17,6 +18,8 @@ from .script import ClipScript
 
 YOUTUBE_TAGS_MAX_CHARS = 500  # all tags together
 # Placeholders: {station} {program} {date} {reporter} {reporter_credit} {title}
+DEFAULT_TITLE_TEMPLATE = "{title}[{station} {program}]"
+YOUTUBE_TITLE_MAX = 100
 DEFAULT_FOOTER = "{reporter_credit}\n{station} {program} {date} 방송"
 
 # 전라남도 22개 시·군과 광주 (tags). A name counts only at the start of a word.
@@ -40,20 +43,43 @@ def format_date(script: ClipScript) -> str:
     return f"{d.year}년 {d.month}월 {d.day}일" if d else ""
 
 
-def footer(script: ClipScript, template: str | None) -> str:
-    values = defaultdict(
+def _values(script: ClipScript, title: str | None = None) -> defaultdict:
+    return defaultdict(
         str,
         station=script.station,
         program=script.program,
         date=format_date(script),
         reporter=script.reporter or "",
         reporter_credit=f"취재: {script.reporter} 기자" if script.reporter else "",
-        title=script.title,
+        title=script.title if title is None else title,
     )
+
+
+def _format(template: str, values: defaultdict) -> str:
     try:
-        text = (template or DEFAULT_FOOTER).format_map(values)
+        return template.format_map(values)
     except (ValueError, IndexError):  # a stray brace in a hand-written template
-        text = template or ""
+        return template
+
+
+def youtube_title(title: str, script: ClipScript, template: str | None) -> tuple[str, list[str]]:
+    """The upload title: `title` in the program's template. Over YouTube's 100 characters the
+    title part is shortened (the program suffix stays) and a warning says so."""
+    template = template or DEFAULT_TITLE_TEMPLATE
+
+    def render(t: str) -> str:
+        text = re.sub(r" {2,}", " ", _format(template, _values(script, t)))
+        return re.sub(r"\s+\]", "]", re.sub(r"\[\s+", "[", text)).strip()  # "[목포MBC ]" without a program
+
+    full = render(title)
+    if len(full) <= YOUTUBE_TITLE_MAX:
+        return full, []
+    room = YOUTUBE_TITLE_MAX - (len(full) - len(title)) - 1
+    return render(title[: max(0, room)].rstrip() + "…"), ["제목이 유튜브 제한(100자)을 넘어 원고 제목 부분을 줄였습니다"]
+
+
+def footer(script: ClipScript, template: str | None) -> str:
+    text = _format(template or DEFAULT_FOOTER, _values(script))
     lines = [" ".join(line.split()) for line in text.splitlines()]
     return "\n".join(line for line in lines if line).strip()
 
@@ -132,9 +158,14 @@ def thumbnail_text(title: str, kind: str = "report") -> str:
     return _balanced_lines(title)
 
 
-def build(script: ClipScript, footer_template: str | None, default_tags: list[str] | None) -> Defaults:
+def build(
+    script: ClipScript,
+    footer_template: str | None,
+    default_tags: list[str] | None,
+    title_template: str | None = None,
+) -> Defaults:
     return Defaults(
-        title=script.title,
+        title=youtube_title(script.title, script, title_template)[0],
         description=description(script, footer_template),
         tags=tags(script, default_tags),
         thumbnail_text=thumbnail_text(script.title, script.kind),

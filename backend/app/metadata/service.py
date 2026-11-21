@@ -54,12 +54,15 @@ def generate(
     provider: LLMProvider | None,
     footer_template: str | None = None,
     default_tags: list[str] | None = None,
+    title_template: str | None = None,
 ) -> Generated:
-    """Pure part: no database. Script-based defaults plus checked LLM candidates."""
-    base = defaults.build(script, footer_template, default_tags)
+    """Pure part: no database. Script-based defaults plus checked LLM candidates.
+    Titles (the script's and the LLM's) are put in the program's title template."""
+    base = defaults.build(script, footer_template, default_tags, title_template)
+    _, title_warnings = defaults.youtube_title(script.title, script, title_template)
     out = Generated(
         title=base.title,
-        title_candidates=[_candidate(base.title, "script")],
+        title_candidates=[_candidate(base.title, "script", title_warnings)],
         description=base.description,
         summary=None,
         tags=base.tags,
@@ -68,9 +71,8 @@ def generate(
         thumbnail_text_candidates=[_candidate(base.thumbnail_text, "title")] if base.thumbnail_text else [],
         warnings=[],
     )
-    if len(base.title) > 100:
-        out.warnings.append("제목이 유튜브 제한(100자)보다 깁니다")
     if provider is None:
+        out.warnings += title_warnings
         return out
     out.llm_provider, out.llm_model = provider.name, provider.model
     try:
@@ -92,8 +94,9 @@ def generate(
     out.input_tokens, out.output_tokens = result.input_tokens, result.output_tokens
 
     for i, title in enumerate(s.titles, 1):
-        if title != base.title:
-            out.title_candidates.append(_candidate(title, "llm", factcheck.warnings_for(f"대안 제목 {i}", title, ref)))
+        if title != script.title:
+            full, warn = defaults.youtube_title(title, script, title_template)
+            out.title_candidates.append(_candidate(full, "llm", factcheck.warnings_for(f"대안 제목 {i}", title, ref) + warn))
     if script.kind == "report" and s.summary:
         out.summary = s.summary
         out.warnings += factcheck.warnings_for("요약", s.summary, ref)
@@ -162,6 +165,7 @@ class ClipInput:
     script: ClipScript
     footer_template: str | None
     default_tags: list[str] | None
+    title_template: str | None = None
 
 
 def clip_input(session: Session, clip: Clip) -> ClipInput:
@@ -172,11 +176,12 @@ def clip_input(session: Session, clip: Clip) -> ClipInput:
         clip_script(clip, job, get_settings().station_name),
         program.description_footer if program else None,
         list(program.default_tags or []) if program else None,
+        program.title_template if program else None,
     )
 
 
 def run(inp: ClipInput, provider: LLMProvider | None) -> Generated:
-    g = generate(inp.script, provider, inp.footer_template, inp.default_tags)
+    g = generate(inp.script, provider, inp.footer_template, inp.default_tags, inp.title_template)
     log.info(
         "metadata generated",
         extra={"clip_id": inp.clip_id, "llm": g.llm_status, "input_tokens": g.input_tokens,

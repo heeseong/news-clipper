@@ -69,7 +69,7 @@ class StaticProvider(LLMProvider):
 
 def test_report_defaults_come_from_the_script():
     d = defaults.build(REPORT, None, ["뉴스", "목포MBC"])
-    assert d.title == "압해도 새 다리 개통"
+    assert d.title == "압해도 새 다리 개통[목포MBC 뉴스데스크]"  # like the channel
     lead, footer = d.description.split("\n\n")
     assert lead == "목포시와 신안군을 잇는 새 다리가 오늘 개통했습니다. 공사비 1,200억 원이 들었습니다."
     assert footer == "취재: 홍길동 기자\n목포MBC 뉴스데스크 2026년 11월 4일 방송"
@@ -125,13 +125,13 @@ def test_fact_check_finds_numbers_and_names_missing_from_the_script():
 def test_without_llm_only_the_script_defaults():
     g = generate(REPORT, None)
     assert g.llm_status == "off" and g.summary is None and g.hashtags == []
-    assert g.title_candidates == [{"text": "압해도 새 다리 개통", "source": "script", "warnings": []}]
+    assert g.title_candidates == [{"text": "압해도 새 다리 개통[목포MBC 뉴스데스크]", "source": "script", "warnings": []}]
 
 
 def test_llm_suggestions_are_added_as_candidates():
     g = generate(REPORT, StaticProvider(suggestions()), default_tags=["뉴스"])
     assert g.llm_status == "ok" and (g.input_tokens, g.output_tokens) == (120, 40)
-    assert g.title == "압해도 새 다리 개통"  # the script title stays the default (spec 16-5 is open)
+    assert g.title == "압해도 새 다리 개통[목포MBC 뉴스데스크]"  # the script title is the default (2026-11-21)
     assert [c["source"] for c in g.title_candidates] == ["script", "llm", "llm"]
     assert g.summary.startswith("길이 1킬로미터")
     assert g.tags == ["뉴스", "홍길동", "목포", "신안", "압해도", "다리", "신안군"]
@@ -155,7 +155,7 @@ def test_invented_facts_are_flagged_or_dropped():
         thumbnail_text="3년 만의 개통",
     )
     g = generate(REPORT, StaticProvider(s))
-    assert [c["text"] for c in g.title_candidates] == ["압해도 새 다리 개통", "김영록 지사, 압해도 다리 개통식 참석"]
+    assert [c["text"] for c in g.title_candidates] == ["압해도 새 다리 개통[목포MBC 뉴스데스크]", "김영록 지사, 압해도 다리 개통식 참석[목포MBC 뉴스데스크]"]
     assert g.title_candidates[1]["warnings"] == ["대안 제목 1: 원고에 없는 표현 확인 필요 (김영록)"]
     assert "요약: 원고에 없는 표현 확인 필요 (2000)" in g.warnings
     assert "원고에서 확인되지 않아 뺀 키워드·해시태그: 무안공항, #KTX" in g.warnings
@@ -167,7 +167,7 @@ def test_invented_facts_are_flagged_or_dropped():
 def test_llm_failure_keeps_defaults():
     g = generate(REPORT, StaticProvider(LLMError("Claude API 오류 (529): overloaded", 50, 0)))
     assert g.llm_status == "failed" and g.input_tokens == 50
-    assert g.title == "압해도 새 다리 개통" and len(g.title_candidates) == 1
+    assert g.title == "압해도 새 다리 개통[목포MBC 뉴스데스크]" and len(g.title_candidates) == 1
     assert g.warnings[0].startswith("LLM 보완 실패")
     g = generate(REPORT, StaticProvider(RuntimeError("bug")))
     assert g.llm_status == "failed"
@@ -270,3 +270,15 @@ def test_claude_refusal_and_api_errors_become_llm_errors():
     provider, _ = claude(err)
     with pytest.raises(LLMError, match="529"):
         provider.suggest(REPORT)
+
+
+def test_youtube_title_template():
+    assert defaults.youtube_title("새 다리 개통", REPORT, None) == ("새 다리 개통[목포MBC 뉴스데스크]", [])
+    assert defaults.youtube_title("새 다리 개통", REPORT, "{title} | {program}")[0] == "새 다리 개통 | 뉴스데스크"
+    no_program = ClipScript(**{**REPORT.__dict__, "program": ""})
+    assert defaults.youtube_title("새 다리 개통", no_program, None)[0] == "새 다리 개통[목포MBC]"
+    long = "가" * 95
+    title, warnings = defaults.youtube_title(long, REPORT, None)
+    assert len(title) == 100 and title.endswith("…[목포MBC 뉴스데스크]") and warnings
+    g = generate(ClipScript(**{**REPORT.__dict__, "title": long}), None)
+    assert g.warnings == warnings and g.title_candidates[0]["warnings"] == warnings
