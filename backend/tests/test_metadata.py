@@ -27,6 +27,10 @@ REPORT = ClipScript(
     station="목포MBC",
 )
 REPORT.all_text = "\n".join([REPORT.title, *REPORT.lead, *REPORT.body, "엠비씨 뉴스 홍길동입니다."])
+REPORT.script_text = (
+    "◀ 앵 커 ▶\n목포시와 신안군을 잇는 새 다리가\n오늘 개통했습니다.\n\n◀ 리포트 ▶\n길이 1킬로미터의 다리가 문을 열었습니다.\n\n"
+    "◀ 인터뷰 ▶ 김주민\n이제 병원 가기가 편해졌습니다.\n\nMBC 뉴스 홍길동입니다."
+)
 REPORT_SPLIT = ClipScript(**{**REPORT.__dict__, "title": "압해도 새 다리…오늘 개통"})
 BRIEF = ClipScript(
     kind="brief",
@@ -70,14 +74,27 @@ class StaticProvider(LLMProvider):
 def test_report_defaults_come_from_the_script():
     d = defaults.build(REPORT, None, ["뉴스", "목포MBC"])
     assert d.title == "압해도 새 다리 개통[목포MBC 뉴스데스크]"  # like the channel
-    lead, footer = d.description.split("\n\n")
-    assert lead == "목포시와 신안군을 잇는 새 다리가 오늘 개통했습니다. 공사비 1,200억 원이 들었습니다."
-    assert footer == "취재: 홍길동 기자\n목포MBC 뉴스데스크 2026년 11월 4일 방송"
+    # The description is the newsroom script as written, then the footer (2026-11-21).
+    assert d.description == REPORT.script_text + "\n\n취재: 홍길동 기자\n목포MBC 뉴스데스크 2026년 11월 4일 방송"
     assert d.tags == ["뉴스", "목포MBC", "홍길동", "목포", "신안"]
     assert d.thumbnail_text == "압해도 새 다리 개통"
 
 
-def test_brief_description_is_the_whole_text_and_footer_template_is_used():
+def test_description_fits_youtube_and_keeps_the_footer():
+    long = "\n\n".join(f"{i}번째 문단입니다. 아주 긴 원고가 이어집니다." for i in range(400))
+    d = defaults.build(ClipScript(**{**REPORT.__dict__, "script_text": long}), None, [])
+    assert len(d.description.encode()) <= 5000 - defaults.HASHTAG_ROOM_BYTES
+    assert d.description.endswith("2026년 11월 4일 방송") and "…" in d.description
+
+
+def test_script_whitespace_is_tidied_but_the_text_kept():
+    from app.metadata.script import tidy_script
+
+    raw = "◀ 앵 커 ▶\r\n\n 민형배 시장이 \n항의했습니다.\n\n\n\n 서일영 기자입니다.  \n"
+    assert tidy_script(raw) == "◀ 앵 커 ▶\n\n민형배 시장이\n항의했습니다.\n\n서일영 기자입니다."
+
+
+def test_brief_description_without_a_stored_script_uses_its_text_and_footer_template():
     d = defaults.build(BRIEF, "{program} | {date}\n{reporter_credit}\n{unknown}", [])
     assert d.description == (
         "진도군이 겨울 축제 준비에 들어갔습니다. 올해는 체험 행사가 늘어납니다.\n\n뉴스데스크 | 2026년 11월 4일"

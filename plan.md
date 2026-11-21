@@ -359,6 +359,9 @@ news-clipper/
 
 **DoD**: 테스트 채널에 비공개 예약 업로드가 성공하고, 예약 시각에 공개되며 썸네일과 메타데이터가 반영된다.
 
+### M7 뒤에 바뀐 것
+- **유튜브 설명 = 큐시트 원고 그대로 + 꼬리말 (2026-11-21 사용자 결정)**. 이전에는 앵커 리드만 넣었다. 원고는 저장한 큐시트 응답(`Rundown.raw`)의 `articleContent`에서 줄 끝·앞 공백과 연속 빈 줄만 정리한다(`metadata/script.tidy_script`). ◀ 앵 커 ▶, ◀ 리포트 ▶, ◀ SYNC ▶ 같은 표시와 편집기 줄바꿈은 그대로 둔다. YouTube 5,000바이트 안에 들도록 꼬리말과 해시태그 자리를 남기고 원고를 줄 단위로 자른다(…). 이미 만든 메타데이터는 "다시 만들기"를 해야 바뀐다
+
 ### M7에서 정한 것
 - **흐름**: 승인 → 렌더(`RENDERED`) → 클립의 `channel_ids`마다 `PublishTask`(QUEUED) → publish 워커 업로드(UPLOADING) → UPLOADED → 예약이면 SCHEDULED, 아니면 PROCESSING → PUBLISHED. 실패는 FAILED, 사용자 취소는 CANCELLED(기록으로 남김). **클립 상태는 작업 중 가장 덜 진행된 것**(실패가 하나라도 있으면 `UPLOAD_FAILED`)
 - **업로드 시점**: 렌더가 끝나면 자동(`PUBLISH_AUTO=true`, 승인이 사람의 확인). 채널을 고르지 않았으면 렌더까지만 하고 편집기의 "업로드" 버튼이나 작업 상세의 "렌더 완료 N건 업로드"로 올린다

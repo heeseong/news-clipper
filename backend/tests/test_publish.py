@@ -418,3 +418,11 @@ def test_channel_upload_limit_does_not_use_up_the_project_quota(reviewed, client
     assert t.status == PublishStatus.QUEUED and t.error_kind == "quota" and "업로드 개수 한도" in t.last_error
     with session_scope() as db:
         assert quota.used(db, "youtube") == 1650  # only our reservation, not the whole quota
+
+
+def test_description_is_the_newsroom_script(reviewed, client):
+    """2026-11-21: the YouTube description is the cue sheet script as written (+ footer)."""
+    _, _, ids = reviewed
+    desc = detail(client, ids[1])["metadata"]["description"]
+    assert desc.startswith("◀ 앵 커 ▶\n새 다리가 오늘 개통했습니다.\n홍길동 기자입니다.\n◀ END ▶\n◀ 리포트 ▶")
+    assert "엠비씨 뉴스 홍길동입니다." in desc and desc.endswith("목포MBC 뉴스데스크 2026년 11월 4일 방송")
