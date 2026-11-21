@@ -23,8 +23,12 @@ TITLE_MAX = 100
 MIN_CLIP_SECONDS = 1.0
 PRIVACY = ("private", "unlisted", "public")
 # A clip in these states was looked at: an align re-run asks before throwing it away.
-REVIEWED = (ClipStatus.APPROVED, ClipStatus.REJECTED, ClipStatus.RENDERING, ClipStatus.RENDERED)
+UPLOAD_STATES = (ClipStatus.UPLOADING, ClipStatus.UPLOADED, ClipStatus.PROCESSING, ClipStatus.SCHEDULED,
+                 ClipStatus.PUBLISHED, ClipStatus.UPLOAD_FAILED)  # fmt: skip
+REVIEWED = (ClipStatus.APPROVED, ClipStatus.REJECTED, ClipStatus.RENDERING, ClipStatus.RENDERED, *UPLOAD_STATES)
 APPROVED_STATES = (ClipStatus.APPROVED, ClipStatus.RENDERING, ClipStatus.RENDERED)
+# Publishing settings can change until the upload starts (afterwards: cancel the upload first).
+PUBLISH_EDITABLE = (*APPROVED_STATES, ClipStatus.UPLOAD_FAILED)
 # Editable states (later states belong to rendering and publishing, M6/M7).
 EDITABLE = (ClipStatus.DRAFT, ClipStatus.NOT_FOUND)
 
@@ -148,8 +152,10 @@ PUBLISH_FIELDS = {"privacy", "publish_at", "channel_ids"}  # do not change the r
 
 
 def update_metadata(session: Session, clip: Clip, user: User, changes: dict[str, Any]) -> ClipMetadata:
-    if set(changes) <= PUBLISH_FIELDS and clip.status in APPROVED_STATES:
+    if set(changes) <= PUBLISH_FIELDS and clip.status in PUBLISH_EDITABLE:
         check_lock(clip, user)  # publishing settings can still change after approval
+    elif set(changes) <= PUBLISH_FIELDS and clip.status in UPLOAD_STATES:
+        raise ReviewError("업로드가 시작된 뒤에는 발행 설정을 바꿀 수 없습니다 (업로드를 취소한 뒤 바꾸세요)")
     else:
         _editable(clip, user)
     meta = session.get(ClipMetadata, clip.id)
@@ -165,8 +171,17 @@ def update_metadata(session: Session, clip: Clip, user: User, changes: dict[str,
         changes["hashtags"] = list(
             dict.fromkeys("#" + h.strip().lstrip("#").replace(" ", "") for h in changes["hashtags"] if h.strip("# "))
         )
-    if changes.get("publish_at") is not None:
-        changes["publish_at"] = _aware(changes["publish_at"])
+    if "channel_ids" in changes:
+        from app.publish.channels import ChannelError, active_channels
+
+        ids = list(dict.fromkeys(int(i) for i in changes["channel_ids"] or []))
+        try:
+            active_channels(session, ids)
+        except ChannelError as e:
+            raise ReviewError(str(e)) from e
+        changes["channel_ids"] = ids
+    if changes.get("publish_at") is not None:  # stored in UTC (SQLite would drop the +09:00)
+        changes["publish_at"] = _aware(changes["publish_at"]).astimezone(UTC)
     diff = {}
     for key, value in changes.items():
         if key not in METADATA_FIELDS:
@@ -306,10 +321,16 @@ def reject(session: Session, clip: Clip, user: User, reason: str | None) -> None
 
 
 def reopen(session: Session, clip: Clip, user: User) -> None:
-    """Back to editing (before rendering starts)."""
+    """Back to editing. A clip already on a platform must have its upload cancelled first."""
+    from app.publish.service import PublishFlowError, cancel_pending
+
     check_lock(clip, user)
     if clip.status not in REVIEWED:
         raise ReviewError("승인·반려·렌더된 클립만 다시 열 수 있습니다")
+    try:
+        cancel_pending(session, clip)
+    except PublishFlowError as e:
+        raise ReviewError(str(e)) from e
     before = clip.status
     clip.status = ClipStatus.DRAFT if not clip.needs_manual_range else ClipStatus.NOT_FOUND
     clip.reviewed_at = clip.reviewed_by = None
@@ -319,7 +340,7 @@ def reopen(session: Session, clip: Clip, user: User) -> None:
 
 
 def schedule_times(first: datetime, interval_minutes: int, count: int) -> list[datetime]:
-    first = _aware(first)
+    first = _aware(first).astimezone(UTC)
     return [first + timedelta(minutes=interval_minutes * i) for i in range(count)]
 
 

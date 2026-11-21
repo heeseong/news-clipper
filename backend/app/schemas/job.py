@@ -28,6 +28,8 @@ class ClipCounts(BaseModel):
     ranged: int = 0  # with a range (found automatically or set by a reviewer)
     approved: int = 0
     rejected: int = 0
+    uploaded: int = 0  # uploading or on a channel (M7)
+    upload_failed: int = 0
 
 
 class JobOut(BaseModel):

@@ -18,9 +18,12 @@ function syntheticRecording(): string {
   return out;
 }
 
-test("upload a recording, set a clip's range, fill in the review and approve it", async ({ page, request }) => {
+test("upload a recording, set a clip's range, fill in the review, approve it and upload it to a channel", async ({ page, request }) => {
   const file = syntheticRecording();
   await request.post(`${API}/api/programs`, { data: { name: "뉴스데스크" } });
+  // A pretend channel (PUBLISHER=fake) to upload to (M7).
+  const connected = await (await request.post(`${API}/api/channels/connect`, { data: { mode: "fake" }, headers: { "X-Reviewer": "e2e" } })).json();
+  const channelName: string = connected.channel.name;
   await page.addInitScript(() => localStorage.setItem("news-clipper.reviewer", "E2E 검수자"));
 
   // Upload (tus) and create the job; the whole pipeline runs in the request (Celery eager).
@@ -58,6 +61,9 @@ test("upload a recording, set a clip's range, fill in the review and approve it"
   const title = page.locator(".meta-form input").first();
   await expect(title).toBeVisible({ timeout: 30_000 });
   await title.fill("E2E 검수 제목[목포MBC 뉴스데스크]");
+  // Publishing: the channel and a schedule (KST).
+  await page.getByLabel(channelName).check();
+  await page.locator('.meta-form input[type="datetime-local"]').fill("2030-01-01T09:00");
   await page.keyboard.press("Control+s");
   await expect(page.getByRole("button", { name: "저장됨" })).toBeVisible();
   await expect(page.locator(".thumb-grid .thumb")).not.toHaveCount(0);
@@ -69,12 +75,15 @@ test("upload a recording, set a clip's range, fill in the review and approve it"
   await expect(page.getByRole("button", { name: /승인/ })).toBeEnabled();
   await page.locator(".editor-head h1").click();
   await page.keyboard.press("Control+Enter");
-  // Approval starts the final render from the original (M6).
+  // Approval starts the final render from the original (M6), then the upload to the channel (M7).
   await expect
     .poll(async () => (await (await request.get(`${API}/api/clips/${clip.id}`)).json()).status, { timeout: 60_000 })
-    .toBe("RENDERED");
+    .toBe("SCHEDULED");
   const detail = await (await request.get(`${API}/api/clips/${clip.id}`)).json();
   expect(detail.metadata.title).toBe("E2E 검수 제목[목포MBC 뉴스데스크]");
+  expect(detail.metadata.publish_at).toMatch(/^2030-01-01T00:00:00/);
+  expect(detail.publish_tasks).toHaveLength(1);
+  expect(detail.publish_tasks[0]).toMatchObject({ status: "SCHEDULED", channel_name: channelName, thumbnail_status: "ok" });
   const audit = await (await request.get(`${API}/api/clips/${clip.id}/audit`)).json();
   expect(audit.map((a: { action: string }) => a.action)).toEqual(
     expect.arrayContaining(["range", "metadata", "acknowledge", "approve"]),
@@ -92,4 +101,19 @@ test("upload a recording, set a clip's range, fill in the review and approve it"
     (v: HTMLVideoElement) => new Promise<number>((r) => (v.readyState >= 1 ? r(v.duration) : v.addEventListener("loadedmetadata", () => r(v.duration), { once: true }))),
   );
   expect(duration).toBeCloseTo(detail.end_sec - detail.start_sec, 0);
+
+  // The editor shows the upload; the dashboard lists it.
+  await expect(page.locator(".publish-box .task-card")).toContainText("예약됨");
+  const shots = process.env.E2E_SCREENSHOTS;
+  if (shots) await page.screenshot({ path: `${shots}/editor.png`, fullPage: true });
+  await page.goto("/publish");
+  await expect(page.getByRole("link", { name: /E2E|1\./ }).first()).toBeVisible();
+  await expect(page.locator(".publish-table")).toContainText("예약됨");
+  await expect(page.locator(".summary-card").first()).toContainText(channelName);
+  if (shots) {
+    await page.screenshot({ path: `${shots}/publish.png`, fullPage: true });
+    await page.goto("/channels");
+    await expect(page.getByRole("heading", { name: "프로그램 기본 채널" })).toBeVisible();
+    await page.screenshot({ path: `${shots}/channels.png`, fullPage: true });
+  }
 });

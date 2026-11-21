@@ -81,6 +81,32 @@ class Settings(BaseSettings):
     render_fade_in: float = 0.0
     render_fade_out: float = 0.0
 
+    # Publishing (spec 5.9, plan M7). "fake" connects pretend channels (dev, E2E); "youtube" connects
+    # real channels with Google OAuth. Each channel's platform picks its Publisher.
+    publisher: Literal["fake", "youtube"] = "fake"
+    # Upload as soon as an approved clip is rendered (when it has channels); otherwise "업로드" button.
+    publish_auto: bool = True
+    # Fernet key for channel tokens: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    token_encryption_key: SecretStr | None = None
+    google_client_id: str | None = None
+    # Sent as HTTP Basic auth to the token endpoint; "proxy-injected" when a proxy adds it.
+    google_client_secret: SecretStr | None = None
+    # Browser redirect flow (needs https or localhost, registered on the OAuth client), e.g.
+    # https://clipper.example.com/api/channels/oauth/callback. Empty: device-code flow only.
+    google_oauth_redirect_uri: str | None = None
+    google_oauth_url: str = "https://oauth2.googleapis.com"
+    google_auth_url: str = "https://accounts.google.com/o/oauth2/v2/auth"
+    youtube_api_url: str = "https://www.googleapis.com"
+    youtube_daily_quota: int = 10_000  # units per Google Cloud project per day (Pacific time)
+    youtube_quota_insert: int = 1600
+    youtube_quota_thumbnail: int = 50
+    youtube_quota_delete: int = 50
+    youtube_chunk_mb: int = 16  # resumable upload chunk (a multiple of 8 MB)
+    youtube_category_id: str = "25"  # News & Politics
+    youtube_language: str = "ko"
+    youtube_notify_subscribers: bool = True
+    publish_max_attempts: int = 5  # network / 5xx errors (1, 2, 4, 8, 16 minutes apart)
+
     # Run Celery tasks in-process (tests, or running the API without workers).
     celery_always_eager: bool = False
 

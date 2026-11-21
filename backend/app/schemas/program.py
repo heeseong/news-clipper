@@ -30,6 +30,9 @@ class ProgramIn(BaseModel):
         "{reporter_credit} {title}. '' = built-in default; none = unchanged",
     )
     default_tags: list[str] | None = Field(None, description="Tags on every clip; none = unchanged")
+    default_channels: list[int] | None = Field(
+        None, description="Channels new clips upload to (ids from /api/channels); none = unchanged"
+    )
     thumbnail_template: dict[str, Any] | None = Field(
         None, description="Thumbnail overlay design (app/thumbnails/overlay.py); none = unchanged"
     )
@@ -45,4 +48,5 @@ class ProgramOut(ProgramIn):
     title_template: str | None
     description_footer: str | None
     default_tags: list[str]
+    default_channels: list[int]
     thumbnail_template: dict[str, Any]

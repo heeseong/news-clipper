@@ -34,7 +34,9 @@ export function Layout() {
           <NavLink to="/jobs" end>
             작업
           </NavLink>
-          <NavLink to="/upload">업로드</NavLink>
+          <NavLink to="/upload">녹화본 올리기</NavLink>
+          <NavLink to="/publish">게시 현황</NavLink>
+          <NavLink to="/channels">채널</NavLink>
         </nav>
         <ReviewerName />
         <span className={`live-dot ${live ? "on" : ""}`} title={live ? "실시간 갱신 중" : "연결 끊김: 주기적으로 갱신"} />

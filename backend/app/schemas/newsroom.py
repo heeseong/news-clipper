@@ -122,6 +122,7 @@ class ClipOut(BaseModel):
     rendered_at: datetime | None = None
     render_error: str | None = None
     render_url: str | None = None  # the final render (M6), when RENDERED
+    remote_urls: list[str] = []  # uploaded videos (M7)
     locked_by_name: str | None = None  # another reviewer editing it right now
 
 
@@ -182,6 +183,7 @@ class ThumbnailOut(BaseModel):
 
 class ClipDetailOut(ClipOut):
     metadata: ClipMetadataOut | None = None
+    publish_tasks: list[Any] = []  # PublishTaskOut (app/schemas/publish.py), cancelled ones left out
     thumbnails: list[ThumbnailOut] = []
     approval_problems: list[str] = []  # empty = can be approved
     lock_expires_at: datetime | None = None
@@ -214,7 +216,7 @@ class RejectIn(BaseModel):
 
 class BulkIn(BaseModel):
     clip_ids: list[int] = Field(min_length=1)
-    action: str = Field(pattern="^(approve|schedule)$")
+    action: str = Field(pattern="^(approve|schedule|publish)$")
     # schedule: the first clip (in cue sheet order) at first_at, then every interval_minutes
     first_at: datetime | None = None
     interval_minutes: int = Field(10, ge=1, le=24 * 60)

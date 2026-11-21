@@ -12,7 +12,15 @@ export function useClipDetail(id: number) {
     queryKey: clipKey(id),
     queryFn: () => api.get<ClipDetail>(`/api/clips/${id}`),
     // Follow the final render after approval (M6).
-    refetchInterval: (q) => (q.state.data && ["APPROVED", "RENDERING"].includes(q.state.data.status) && !q.state.data.render_error ? 2000 : false),
+    // Follow the render and the upload (M7) after approval.
+    refetchInterval: (q) => {
+      const c = q.state.data;
+      if (!c) return false;
+      if (["APPROVED", "RENDERING"].includes(c.status) && !c.render_error) return 2000;
+      if (["UPLOADING", "UPLOADED", "PROCESSING"].includes(c.status)) return 3000;
+      if (c.status === "SCHEDULED") return 60_000;
+      return false;
+    },
   });
 }
 
@@ -79,7 +87,7 @@ export function useBulk() {
   return useMutation({
     mutationFn: (body: {
       clip_ids: number[];
-      action: "approve" | "schedule";
+      action: "approve" | "schedule" | "publish";
       first_at?: string;
       interval_minutes?: number;
       privacy?: string;

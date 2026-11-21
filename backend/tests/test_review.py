@@ -191,7 +191,7 @@ def test_bulk_approve_and_schedule(reviewed, client):
     assert res[ids[1]]["ok"] and res[ids[3]]["ok"]
     assert not res[ids[2]]["ok"] and res[ids[2]]["problems"] == ["경고를 확인하지 않았습니다"]
     counts = client.get("/api/jobs").json()["items"][0]["clip_counts"]
-    assert counts == {"total": 3, "ranged": 3, "approved": 2, "rejected": 0}
+    assert counts == {"total": 3, "ranged": 3, "approved": 2, "rejected": 0, "uploaded": 0, "upload_failed": 0}
     # Approved (and rendered) clips can still be rescheduled; their content cannot change.
     later = first + timedelta(days=1)
     r = client.post("/api/clips/bulk", headers=A, json={

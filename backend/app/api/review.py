@@ -234,7 +234,7 @@ def regenerate_thumbnails(clip_id: int, db: DbSession, user: Reviewer) -> dict:
 
 @router.post("/clips/bulk", response_model=list[BulkResultOut])
 def bulk(body: BulkIn, db: DbSession, user: Reviewer) -> list[BulkResultOut]:
-    """Approve several clips, or schedule them one after another (cue sheet order)."""
+    """Approve several clips, schedule them one after another (cue sheet order), or upload them."""
     clips = list(
         db.scalars(select(Clip).join(RundownItem).where(Clip.id.in_(body.clip_ids)).order_by(RundownItem.item_no))
     )
@@ -242,6 +242,7 @@ def bulk(body: BulkIn, db: DbSession, user: Reviewer) -> list[BulkResultOut]:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "없는 클립이 있습니다")
     results = []
     approved: list[int] = []
+    uploads: list[int] = []
     if body.action == "schedule":
         if body.first_at is None:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "첫 예약 시각(first_at)이 필요합니다")
@@ -252,6 +253,18 @@ def bulk(body: BulkIn, db: DbSession, user: Reviewer) -> list[BulkResultOut]:
                 review.update_metadata(db, clip, user, changes)
                 results.append(BulkResultOut(clip_id=clip.id, ok=True, publish_at=at))
             except review.ReviewError as e:
+                results.append(BulkResultOut(clip_id=clip.id, ok=False, error=str(e)))
+    elif body.action == "publish":
+        from app.publish import service as publishing
+
+        for clip in clips:
+            try:
+                ids = publishing.enqueue(db, clip, user)
+                if ids:
+                    review.audit(db, user, clip, "publish", {"tasks": ids})
+                    uploads.extend(ids)
+                results.append(BulkResultOut(clip_id=clip.id, ok=bool(ids), error=None if ids else "새로 올릴 채널이 없습니다"))
+            except publishing.PublishFlowError as e:
                 results.append(BulkResultOut(clip_id=clip.id, ok=False, error=str(e)))
     else:
         for clip in clips:
@@ -269,6 +282,10 @@ def bulk(body: BulkIn, db: DbSession, user: Reviewer) -> list[BulkResultOut]:
     for job_id in {c.job_id for c in clips}:
         publish_job_changed(job_id)
     _queue_render(approved)
+    if uploads:
+        from app.publish.service import dispatch
+
+        dispatch(uploads)
     return results
 
 

@@ -5,7 +5,7 @@
 
 ## 먼저 읽을 것
 - `spec.md` — 기능 명세(v1.0). 정렬·경계 규칙의 근거는 5.5절
-- `plan.md` — 마일스톤과 진행 상태. M0~M6 구현(로그인 보류, M3는 원래 골든셋 4편 재현, M4는 실제 Claude 호출·HD 녹화본 확인이 남음, M5 채널 선택은 M7 뒤, M6는 HD 원본 렌더 시간 확인이 남음). 다음 작업은 **M7(YouTube 업로드·예약 발행)**: M7 절의 **"M7 시작 가이드"**에 지금 상태, 연결점, 만들 것, 사용자에게 받을 것이 정리돼 있다. 각 마일스톤의 "정한 것"에 규칙이 있다
+- `plan.md` — 마일스톤과 진행 상태. M0~M6 구현(로그인 보류, M3는 원래 골든셋 4편 재현, M4는 실제 Claude 호출·HD 녹화본 확인이 남음, M6는 HD 원본 렌더 시간 확인이 남음). **M7(YouTube 업로드·예약 발행)** 구현, 실제 테스트 채널 업로드 확인이 남음(M7 절 "실제 채널 확인 절차"). 다음 작업은 **M8(상태 확인·재시도·알림)**. 각 마일스톤의 "정한 것"에 규칙이 있다
 - `eval/poc/RESULTS.md` — 정렬 PoC 결과와 방송별 실패 사례
 
 ## 핵심 결정 (바꾸기 전에 사용자와 확인)
@@ -18,11 +18,12 @@
 - 외부 연동(MARS-L, Claude, YouTube)은 인터페이스 + Fake 구현을 먼저 만든다
 - 메타데이터 기본값은 원고에서, LLM(Claude) 결과는 후보로만. 유튜브 제목은 `원고 제목[목포MBC 뉴스데스크]`(2026-11-21, 프로필 `title_template`). LLM 실패는 경고만 남기고 단계는 성공. LLM에는 원고 텍스트만 보낸다
 - 썸네일: 리포트는 대표 프레임 + 템플릿 이미지(나중에 교체) + 제목 두 줄, 단신은 앵커 샷 뒤 하단 제목 자막이 처음 뜬 화면 그대로(2026-11-20)
-- 검수: 승인 → 원본 화질 자동 렌더(페이드 없음, 첫 프레임 = 검수에서 지정한 프레임). 승인 뒤 구간·내용을 고치려면 "다시 열기"(렌더 삭제). 발행 설정(공개 범위·예약·채널)은 승인 뒤에도 변경 가능
+- 검수: 승인 → 원본 화질 자동 렌더(페이드 없음, 첫 프레임 = 검수에서 지정한 프레임) → 클립의 채널로 자동 업로드(채널 없으면 렌더까지만). 승인 뒤 구간·내용을 고치려면 "다시 열기"(렌더 삭제, 플랫폼에 올라간 영상이 있으면 먼저 업로드 취소). 발행 설정(공개 범위·예약·채널)은 업로드가 시작되기 전까지 변경 가능
+- 업로드(M7): 채널마다 `PublishTask`, 클립 상태는 가장 덜 진행된 작업을 따른다. YouTube 할당량은 Google Cloud 프로젝트 단위(태평양 시간 자정 초기화). 채널 토큰은 `TOKEN_ENCRYPTION_KEY`로 암호화
 
 ## 저장소 구조 (현재)
 - `backend/app/core/` — 설정(`config.py`, 환경변수), JSON 로깅, DB 세션
-- `backend/app/models/` — SQLAlchemy 모델(User, ProgramProfile, Job, JobStep, Rundown, RundownItem, Clip, AlignedSentence, ClipMetadata, Thumbnail, AuditLog). 바꾸면 Alembic 마이그레이션(`backend/alembic/versions/000N_설명.py`, 현재 0010)도 만든다
+- `backend/app/models/` — SQLAlchemy 모델(User, ProgramProfile, Job, JobStep, Rundown, RundownItem, Clip, AlignedSentence, ClipMetadata, Thumbnail, AuditLog, Channel, OAuthSession, PublishTask, QuotaUsage). 바꾸면 Alembic 마이그레이션(`backend/alembic/versions/00NN_설명.py`, 현재 0011)도 만든다
 - `backend/app/pipeline/` — 단계 정의(`definition.py`), 상태 전이(`orchestrator.py`, Celery 없음), Celery 태스크(`tasks.py`), 단계 처리기(`handlers.py`, `@register("proxy")`). 처리기가 없는 단계는 SKIPPED
 - `backend/app/media/` — ffprobe·ffmpeg 래퍼(`ffmpeg.py`), 프록시·스프라이트·파형(`proxy.py`), 정렬용 오디오·장면 전환·무음(`analysis.py`)
 - `backend/app/uploads.py`, `api/uploads.py` — tus 업로드. `intake.py` — 업로드 → 작업 생성(ffprobe 검증, 경고). `storage.py` — 저장 경로
@@ -36,9 +37,10 @@
 - `backend/app/thumbnails/` — 썸네일(M4): 후보 시각·추출·점수(`candidates.py`, 얼굴 YuNet `models/`), 오버레이(`overlay.py`, 폰트 `fonts/`), 단계(`service.py`)
 - `backend/app/review/` — 검수(M5): 검수자(헤더 `X-Reviewer`, 로그인 전 임시), 잠금, 구간·메타 수정, 썸네일 선택·추가, 승인·반려·다시 열기, 재실행 보호, 감사 로그. 라우터 `api/review.py`
 - `backend/app/render/` — 최종 렌더(M6): 원본에서 프레임 정확 자르기, loudnorm 2-pass, 검증. 승인하면 `clips.render` 태스크(media 큐). `backend/app/media/seek.py` — 렌더·썸네일 프레임이 함께 쓰는 정확한 구간 접근(거친 입력 탐색 + `-copyts` + `trim`)
+- `backend/app/publish/` — 업로드(M7): Publisher 인터페이스(`base.py`), 가짜 플랫폼(`fake.py`), YouTube 어댑터(`youtube.py`, httpx), Google OAuth(`oauth.py`), 채널 연결(`channels.py`), 토큰 암호화(`crypto.py`), 할당량(`quota.py`), 선택·토큰 갱신(`factory.py`), 업로드 흐름·재시도·상태 확인(`service.py`), Celery 태스크(`tasks.py`, publish 큐 + beat `publish.sweep` 1분). 라우터 `api/channels.py`, `api/publish.py`. 설정 `PUBLISHER=fake|youtube`
 - `backend/tests/` — 단위 테스트. `tests/fixtures/synthetic.py`는 FFmpeg 합성 테스트 영상(컷·무음 위치를 알고 있음)
-- `frontend/` — React + Vite + TS. `src/api/`(API 클라이언트·TanStack Query 훅), `src/pages/`(작업 목록·상세, 업로드, 클립 편집기 `ClipEditorPage`), `e2e/`(Playwright E2E, `npm run e2e`)
-- `docker-compose.yml` — 서버 한 대 배포(postgres, redis, migrate, api, 워커 4개, web)
+- `frontend/` — React + Vite + TS. `src/api/`(API 클라이언트·TanStack Query 훅), `src/pages/`(작업 목록·상세, 업로드, 클립 편집기 `ClipEditorPage`, 게시 현황 `PublishPage`, 채널 `ChannelsPage`), `e2e/`(Playwright E2E, `npm run e2e`)
+- `docker-compose.yml` — 서버 한 대 배포(postgres, redis, migrate, api, 워커 4개, beat, web)
 - `eval/tools/` — MARS-L 출력물(PDF) → API 형식 JSON 변환기(API 키를 받기 전 임시용), 파싱 검토 리포트 생성
 - `eval/poc/` — 정렬 PoC 스크립트(`compute_logits.py`, `align_poc.py`). 서비스 코드는 `backend/app/align/`
 - `eval/tools/score_alignment.py` — 서비스 정렬을 녹화본 한 편에 돌려 `ground_truth.json`과 비교(골든셋 회귀)
@@ -70,6 +72,7 @@ cd backend && .venv/bin/python ../eval/tools/score_alignment.py ../eval/data/<�
 - deb.debian.org가 막혀 있어 세션 안에서는 백엔드 Docker 이미지(FFmpeg 설치)를 빌드할 수 없다. 이미지 빌드는 CI에서 확인한다. Docker 데몬은 `dockerd`로 직접 띄워야 한다
 - `gh`는 GraphQL이 막혀 있다. PR 생성·병합은 REST(`gh api repos/heeseong/news-clipper/pulls ...`)로 한다
 - Anthropic API 키는 아직 없다. 받을 때는 `request_credential`(호스트 `api.anthropic.com`, 헤더 `x-api-key`)로 받고 `LLM_PROVIDER=claude ANTHROPIC_API_KEY=proxy-injected`로 실행한다
+- YouTube(M7): Google OAuth 클라이언트 시크릿은 `request_credential`(호스트 `oauth2.googleapis.com`, Basic: 사용자 이름 = 클라이언트 ID, 비밀번호 = 시크릿)로 받고 `PUBLISHER=youtube GOOGLE_CLIENT_ID=… GOOGLE_CLIENT_SECRET=proxy-injected TOKEN_ENCRYPTION_KEY=…`로 실행한다. 네트워크에 `oauth2.googleapis.com`, `www.googleapis.com`이 필요하다
 - MARS-L 키는 환경의 네트워크 비밀(`api.marsl.co.kr`, 헤더 `Mars-Secret`)로 저장돼 있다(2026-11-20). 실제 API는 `NEWSROOM_PROVIDER=marsl MARSL_API_KEY=proxy-injected`로 호출한다(프록시가 실제 키를 넣는다. 키는 채팅으로 받지 않는다)
 - 이미지에 Python 3.13, Node 22, FFmpeg 6, PostgreSQL 16, Redis 7, Chromium(Playwright)이 있다. 환경의 설정 스크립트가 새 세션 시작 때 `backend/.venv`(uv)와 `frontend/node_modules`(npm ci)를 설치한다(2026-11-19 추가). 없으면 위 "명령"의 `uv venv`, `npm install`로 설치한다
 - 실제 워커·DB로 확인할 때 (테스트에는 필요 없음):
@@ -82,6 +85,7 @@ cd backend && .venv/bin/python ../eval/tools/score_alignment.py ../eval/data/<�
   cd backend && .venv/bin/alembic upgrade head
   .venv/bin/uvicorn app.main:app --port 8000 &        # STORAGE_ROOT=/var/tmp/ncstorage 권장
   .venv/bin/celery -A app.worker worker -Q media,align,ai,publish -c 2 &
+  .venv/bin/celery -A app.worker beat -s /var/tmp/celerybeat &   # 업로드 재시도·상태 확인(M7)
   cd ../frontend && npx vite --port 5173 &              # /api, /media는 8000으로 프록시
   ```
   postgres는 root로 못 띄우므로 `runuser -u postgres`를 쓰고, 데이터 디렉터리는 scratchpad가 아니라 `/var/tmp`에 둔다(postgres 사용자가 scratchpad에 접근 못 함)
