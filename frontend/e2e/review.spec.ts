@@ -125,4 +125,20 @@ test("upload a recording, set a clip's range, fill in the review, approve it and
     await expect(page.getByRole("heading", { name: "프로그램 기본 채널" })).toBeVisible();
     await page.screenshot({ path: `${shots}/channels.png`, fullPage: true });
   }
+
+  // M9: the admin screen — a program profile edit, storage, metrics.
+  await page.goto("/admin");
+  await page.getByRole("button", { name: "프로그램", exact: true }).click();
+  await page.getByLabel(/설명 꼬리말/).fill("{station} {program}");
+  await page.getByRole("button", { name: "저장", exact: true }).click();
+  await expect(page.getByText("저장했습니다")).toBeVisible();
+  const programs = await (await request.get(`${API}/api/programs`)).json();
+  expect(programs[0].description_footer).toBe("{station} {program}");
+  if (shots) await page.screenshot({ path: `${shots}/admin-programs.png`, fullPage: true });
+  await page.getByRole("button", { name: "저장 공간" }).click();
+  await expect(page.getByText("보존 기간 정리")).toBeVisible();
+  if (shots) await page.screenshot({ path: `${shots}/admin-storage.png`, fullPage: true });
+  await page.getByRole("button", { name: "운영 지표" }).click();
+  await expect(page.getByText("자동 검출률")).toBeVisible();
+  if (shots) await page.screenshot({ path: `${shots}/admin-metrics.png`, fullPage: true });
 });

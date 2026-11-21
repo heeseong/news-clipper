@@ -1,6 +1,7 @@
 import { Link, Navigate, Route, Routes } from "react-router-dom";
 
 import { Layout } from "./components/Layout";
+import { AdminPage } from "./pages/AdminPage";
 import { ChannelsPage } from "./pages/ChannelsPage";
 import { ClipEditorPage } from "./pages/ClipEditorPage";
 import { JobDetailPage } from "./pages/JobDetailPage";
@@ -19,6 +20,7 @@ export function App() {
         <Route path="upload" element={<UploadPage />} />
         <Route path="publish" element={<PublishPage />} />
         <Route path="channels" element={<ChannelsPage />} />
+        <Route path="admin" element={<AdminPage />} />
         <Route
           path="*"
           element={

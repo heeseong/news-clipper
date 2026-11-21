@@ -672,6 +672,8 @@ function AuditList({ clipId, version }: { clipId: number; version: string }) {
 
 /** The final render (M6): progress, the result to watch and download, or the error. */
 function RenderStatus({ clip, busy, onRender }: { clip: ClipDetail; busy: boolean; onRender: () => void }) {
+  if (clip.render_purged_at && !clip.render_url)
+    return <p className="small muted render-box">렌더 파일은 보존 기간이 지나 지웠습니다 (YouTube에 올라간 영상은 그대로).</p>;
   if (!["APPROVED", "RENDERING", "RENDERED"].includes(clip.status) && !clip.render_url) return null;
   if (clip.render_error)
     return (

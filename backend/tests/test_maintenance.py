@@ -124,7 +124,7 @@ def test_metrics_summary(reviewed, client, channel):
     assert t["jobs"] == 1 and t["clips"] == 3
     assert t["auto"] == 3 and t["auto_moved"] == 1 and t["detection_rate"] == 1.0
     assert t["titles_edited"] == 1 and t["approved"] == 1 and t["rejected"] == 1
-    assert t["uploads"] == 1 and t["published"] == 1 and t["upload_success_rate"] == 1.0
+    assert t["uploads"] == 1 and t["published"] == 1 and t["upload_success_rate"] == 1.0 and t["on_platform"] == 0
     assert "align" in t["median_step_seconds"] and t["median_pipeline_seconds"] is not None
     (row,) = m["jobs"]
     assert row["job_id"] == job_id and row["llm_input_tokens"] >= 0

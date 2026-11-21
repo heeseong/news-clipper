@@ -57,6 +57,7 @@ class JobMetrics:
     llm_output_tokens: int = 0
     uploads: int = 0
     published: int = 0
+    on_platform: int = 0  # uploaded and waiting to go public (scheduled, processing)
     upload_failed: int = 0
     upload_retries: int = 0
 
@@ -103,6 +104,7 @@ def _job_metrics(session: Session, job: Job) -> JobMetrics:
                                                            PublishTask.status != PublishStatus.CANCELLED)):  # fmt: skip
             m.uploads += 1
             m.published += t.status == PublishStatus.PUBLISHED
+            m.on_platform += t.status in (PublishStatus.UPLOADED, PublishStatus.PROCESSING, PublishStatus.SCHEDULED)
             m.upload_failed += t.status == PublishStatus.FAILED
             m.upload_retries += max(0, (t.attempts or 0) - 1)
     return m
@@ -140,13 +142,16 @@ def summary(session: Session, days: int = 30, now: datetime | None = None) -> di
         "llm_output_tokens": total("llm_output_tokens"),
         "uploads": total("uploads"),
         "published": total("published"),
+        "on_platform": total("on_platform"),
         "upload_failed": total("upload_failed"),
         "upload_retries": total("upload_retries"),
         # Rates the reviewers care about (spec 11)
         "detection_rate": _rate(total("auto"), total("clips")),  # placed by the alignment
         "boundary_edit_rate": _rate(total("auto_moved"), total("auto")),  # ... then moved by a reviewer
         "title_edit_rate": _rate(total("titles_edited"), total("approved")),
-        "upload_success_rate": _rate(total("published"), total("uploads")),
+        # Uploads that reached the platform, of those that finished one way or the other
+        "upload_success_rate": _rate(total("published") + total("on_platform"),
+                                     total("published") + total("on_platform") + total("upload_failed")),
         "median_pipeline_seconds": round(median([r.pipeline_seconds for r in rows if r.pipeline_seconds]), 1)
         if any(r.pipeline_seconds for r in rows) else None,
         "median_step_seconds": {k: round(median(v), 1) for k, v in sorted(by_step.items())},
