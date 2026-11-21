@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from .script import ClipScript
 
-TITLE_MAX = 100  # YouTube limit
+TITLE_MAX = 80  # YouTube allows 100; the program suffix ([목포MBC 뉴스데스크]) is added
 THUMBNAIL_TEXT_MAX = 16  # characters per line, without spaces (two lines at most)
 SUMMARY_MAX = 400
 

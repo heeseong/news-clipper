@@ -19,6 +19,11 @@ class ProgramIn(BaseModel):
     excluded_sources: list[str] | None = Field(
         None, description="Stations whose reports are not uploaded; none = default (광주, 여수) / unchanged"
     )
+    title_template: str | None = Field(
+        None,
+        description="YouTube title; placeholders {title} {station} {program} {date} {reporter}. "
+        "'' = default \"{title}[{station} {program}]\"; none = unchanged",
+    )
     description_footer: str | None = Field(
         None,
         description="YouTube description footer; placeholders {station} {program} {date} {reporter} "
@@ -37,6 +42,7 @@ class ProgramOut(ProgramIn):
     dedupe_program: str | None
     excluded_sources: list[str]
     pronunciations: dict[str, str]
+    title_template: str | None
     description_footer: str | None
     default_tags: list[str]
     thumbnail_template: dict[str, Any]

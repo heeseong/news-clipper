@@ -35,6 +35,8 @@ class ProgramProfile(TimestampMixin, Base):
     # Leave out items that aired in this program the previous day (e.g. 뉴스투데이 → "뉴스데스크").
     dedupe_program: Mapped[str | None] = mapped_column(String(100))
     excluded_sources: Mapped[list[str]] = mapped_column(JSON, default=lambda: list(DEFAULT_EXCLUDED_SOURCES))
+    # YouTube title: "{title}[{station} {program}]" when empty (app/metadata/defaults.py)
+    title_template: Mapped[str | None] = mapped_column(String(255))
     description_footer: Mapped[str | None] = mapped_column(Text)
     default_tags: Mapped[list[str]] = mapped_column(JSON, default=list)
     thumbnail_template: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
