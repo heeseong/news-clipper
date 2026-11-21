@@ -74,7 +74,7 @@ def test_approve_render_upload_schedule_then_published(reviewed, client, channel
     meta = d["metadata"]
     assert video["title"] == meta["title"] and video["privacy"] == "public" and video["thumbnail"]
     assert video["publish_at"].startswith("2030-01-01T09:00") and video["category_id"] == "25" and video["language"] == "ko"
-    assert all(h in video["description"] for h in meta["hashtags"])
+    assert video["description"] == meta["description"]  # as reviewed, nothing appended
     # Uploaded: no reopening, no changing the schedule (cancel first).
     assert client.post(f"/api/clips/{cid}/reopen", headers=A).status_code == 409
     r = client.patch(f"/api/clips/{cid}", json={"privacy": "private"}, headers=A)
@@ -421,8 +421,8 @@ def test_channel_upload_limit_does_not_use_up_the_project_quota(reviewed, client
 
 
 def test_description_is_the_newsroom_script(reviewed, client):
-    """2026-11-21: the YouTube description is the cue sheet script as written (+ footer)."""
+    """2026-11-21: the YouTube description is "[목포MBC 뉴스]" + the cue sheet script as written."""
     _, _, ids = reviewed
     desc = detail(client, ids[1])["metadata"]["description"]
-    assert desc.startswith("◀ 앵 커 ▶\n새 다리가 오늘 개통했습니다.\n홍길동 기자입니다.\n◀ END ▶\n◀ 리포트 ▶")
-    assert "엠비씨 뉴스 홍길동입니다." in desc and desc.endswith("목포MBC 뉴스데스크 2026년 11월 4일 방송")
+    assert desc.startswith("[목포MBC 뉴스]\n◀ 앵 커 ▶\n새 다리가 오늘 개통했습니다.\n홍길동 기자입니다.\n◀ END ▶\n◀ 리포트 ▶")
+    assert desc.endswith("엠비씨 뉴스 홍길동입니다.\n◀ END ▶")
