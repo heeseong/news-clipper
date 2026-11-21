@@ -121,6 +121,7 @@ class ClipOut(BaseModel):
     kind: str = "report"  # report | brief (thumbnail style)
     rendered_at: datetime | None = None
     render_error: str | None = None
+    render_purged_at: datetime | None = None  # the render file was deleted (retention, M9.2)
     render_url: str | None = None  # the final render (M6), when RENDERED
     remote_urls: list[str] = []  # uploaded videos (M7)
     locked_by_name: str | None = None  # another reviewer editing it right now

@@ -12,6 +12,7 @@ Run one worker per queue so heavy work cannot starve the rest (spec 6):
 from __future__ import annotations
 
 from celery import Celery
+from celery.schedules import crontab
 from celery.signals import setup_logging as celery_setup_logging
 from kombu import Queue
 
@@ -39,10 +40,13 @@ celery_app.conf.update(
     task_always_eager=settings.celery_always_eager,
     task_eager_propagates=True,
     broker_connection_retry_on_startup=True,
-    imports=["app.pipeline.tasks", "app.publish.tasks"],
+    imports=["app.pipeline.tasks", "app.publish.tasks", "app.maintenance.tasks"],
     # Celery beat (`celery -A app.worker beat`): retries, quota waits and status checks of uploads.
     beat_schedule={
         "publish-sweep": {"task": "publish.sweep", "schedule": 60.0, "options": {"queue": "publish", "expires": 50}},
+        # Retention cleanup (M9.2), daily at 03:17 KST; it checks RETENTION_ENABLED itself.
+        "retention-cleanup": {"task": "maintenance.cleanup", "schedule": crontab(hour=3, minute=17),
+                              "options": {"queue": "media", "expires": 3600}},
     },
 )
 

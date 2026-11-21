@@ -232,8 +232,8 @@ def render_clip(self, clip_id: int) -> str:
     out = files.final(clip_id)
     error = None
     try:
-        if not source or not files.probe.exists():
-            raise RenderError("원본 영상이 없습니다")
+        if not source or not Path(source).exists() or not files.probe.exists():
+            raise RenderError("원본 영상이 없습니다 (보존 기간이 지나 삭제됐을 수 있습니다)")
         probe = ProbeResult.model_validate_json(files.probe.read_text())
         opts = RenderOptions(
             max_height=s.render_max_height, crf=s.render_crf, preset=s.render_preset, loudness=s.render_loudness,

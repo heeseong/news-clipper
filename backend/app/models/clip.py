@@ -82,6 +82,8 @@ class Clip(TimestampMixin, Base):
     # Final render (M6): render_path is set when RENDERED; render_error when the last try failed.
     rendered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     render_error: Mapped[str | None] = mapped_column(Text)
+    # The render file was deleted by the retention cleanup (M9.2); the upload stays on the platform.
+    render_purged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     rundown_item: Mapped[RundownItem] = relationship()
     locker: Mapped[User | None] = relationship(foreign_keys=[locked_by])

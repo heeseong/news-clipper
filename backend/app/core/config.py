@@ -108,6 +108,14 @@ class Settings(BaseSettings):
     youtube_notify_subscribers: bool = True
     publish_max_attempts: int = 5  # network / 5xx errors (1, 2, 4, 8, 16 minutes apart)
 
+    # Retention (spec 6.2, plan M9.2). Off until the periods are confirmed; the admin screen shows
+    # what a run would delete either way. Daily at 03:17 KST when enabled.
+    retention_enabled: bool = False
+    retention_source_days: int = 30  # the original recording (re-renders need it)
+    retention_work_days: int = 90  # proxy, sprite, alignment audio, acoustic model cache
+    retention_render_days: int = 30  # final.mp4 after every upload of the clip is published
+    retention_upload_hours: int = 48  # tus uploads that never became a job
+
     # Run Celery tasks in-process (tests, or running the API without workers).
     celery_always_eager: bool = False
 
