@@ -5,7 +5,7 @@
 
 ## 먼저 읽을 것
 - `spec.md` — 기능 명세(v1.0). 정렬·경계 규칙의 근거는 5.5절
-- `plan.md` — 마일스톤과 진행 상태. M0~M5 구현(로그인 보류, M3는 원래 골든셋 4편 재현, M4는 실제 Claude 호출·HD 녹화본 확인이 남음, M5 채널 선택은 M7 뒤). 다음 작업은 **M6(최종 렌더)**: M6 절의 **"M6 시작 가이드"**에 지금 상태, 연결점, 만들 것, 주의점, 사용자에게 받을 것이 정리돼 있다. 각 마일스톤의 "정한 것"에 규칙이 있다
+- `plan.md` — 마일스톤과 진행 상태. M0~M6 구현(로그인 보류, M3는 원래 골든셋 4편 재현, M4는 실제 Claude 호출·HD 녹화본 확인이 남음, M5 채널 선택은 M7 뒤, M6는 HD 원본 렌더 시간 확인이 남음). 다음 작업은 **M7(YouTube 업로드·예약 발행)**. 각 마일스톤의 "정한 것"에 규칙이 있다
 - `eval/poc/RESULTS.md` — 정렬 PoC 결과와 방송별 실패 사례
 
 ## 핵심 결정 (바꾸기 전에 사용자와 확인)
@@ -21,7 +21,7 @@
 
 ## 저장소 구조 (현재)
 - `backend/app/core/` — 설정(`config.py`, 환경변수), JSON 로깅, DB 세션
-- `backend/app/models/` — SQLAlchemy 모델(User, ProgramProfile, Job, JobStep, Rundown, RundownItem, Clip, AlignedSentence, ClipMetadata, Thumbnail, AuditLog). 바꾸면 Alembic 마이그레이션(`backend/alembic/versions/000N_설명.py`, 현재 0009)도 만든다
+- `backend/app/models/` — SQLAlchemy 모델(User, ProgramProfile, Job, JobStep, Rundown, RundownItem, Clip, AlignedSentence, ClipMetadata, Thumbnail, AuditLog). 바꾸면 Alembic 마이그레이션(`backend/alembic/versions/000N_설명.py`, 현재 0010)도 만든다
 - `backend/app/pipeline/` — 단계 정의(`definition.py`), 상태 전이(`orchestrator.py`, Celery 없음), Celery 태스크(`tasks.py`), 단계 처리기(`handlers.py`, `@register("proxy")`). 처리기가 없는 단계는 SKIPPED
 - `backend/app/media/` — ffprobe·ffmpeg 래퍼(`ffmpeg.py`), 프록시·스프라이트·파형(`proxy.py`), 정렬용 오디오·장면 전환·무음(`analysis.py`)
 - `backend/app/uploads.py`, `api/uploads.py` — tus 업로드. `intake.py` — 업로드 → 작업 생성(ffprobe 검증, 경고). `storage.py` — 저장 경로
@@ -34,6 +34,7 @@
 - `backend/app/metadata/` — 메타데이터(M4): 클립 원고(`script.py`), 원고 기반 기본값(`defaults.py`), 사실성 검사(`factcheck.py`), LLM 인터페이스·Fake(`llm.py`), Claude(`claude.py`), 선택(`factory.py`, 설정 `LLM_PROVIDER=off|fake|claude`), 단계·재생성(`service.py`)
 - `backend/app/thumbnails/` — 썸네일(M4): 후보 시각·추출·점수(`candidates.py`, 얼굴 YuNet `models/`), 오버레이(`overlay.py`, 폰트 `fonts/`), 단계(`service.py`)
 - `backend/app/review/` — 검수(M5): 검수자(헤더 `X-Reviewer`, 로그인 전 임시), 잠금, 구간·메타 수정, 썸네일 선택·추가, 승인·반려·다시 열기, 재실행 보호, 감사 로그. 라우터 `api/review.py`
+- `backend/app/render/` — 최종 렌더(M6): 원본에서 프레임 정확 자르기, loudnorm 2-pass, 검증. 승인하면 `clips.render` 태스크(media 큐). `backend/app/media/seek.py` — 렌더·썸네일 프레임이 함께 쓰는 정확한 구간 접근(거친 입력 탐색 + `-copyts` + `trim`)
 - `backend/tests/` — 단위 테스트. `tests/fixtures/synthetic.py`는 FFmpeg 합성 테스트 영상(컷·무음 위치를 알고 있음)
 - `frontend/` — React + Vite + TS. `src/api/`(API 클라이언트·TanStack Query 훅), `src/pages/`(작업 목록·상세, 업로드, 클립 편집기 `ClipEditorPage`), `e2e/`(Playwright E2E, `npm run e2e`)
 - `docker-compose.yml` — 서버 한 대 배포(postgres, redis, migrate, api, 워커 4개, web)
@@ -91,6 +92,7 @@ cd backend && .venv/bin/python ../eval/tools/score_alignment.py ../eval/data/<�
 - 첫 리포트에는 거의 항상 앵커 인사말이 있다. 와이드 샷에서 시작해 앵커 컷 뒤까지 이어지기도 한다 → 컷과 리드 사이 음절 수로 감지
 - 장면 컷 검출은 임계값을 낮게(ffmpeg scene 0.1). 컷 프레임은 한 프레임짜리 블렌드일 수 있다(시작 +1프레임, 끝 -½프레임)
 - 프레임 단위로 정확히 자르려면 출력 쪽에서 길이를 지정한다(`-ss A -i IN -t D`). 입력 쪽 `-to`는 한 프레임이 더 들어간다
+- 입력 쪽 `-ss`는 MPEG-TS(타임스탬프가 0에서 시작하지 않음)에서 몇 프레임 늦게 떨어진다(M6에서 발견). 원본의 특정 시각을 자를 때는 `media/seek.window()`(거친 탐색 + `-copyts` + `trim`)를 쓴다
 - 신호 시각(컷, 무음, 정렬)은 모두 **파일 시작 기준**이다. 비디오만 쓰는 ffmpeg 실행(`-map 0:v -an`)은 비디오 스트림 시작 기준으로 재므로, 오디오가 먼저 시작하는 파일에서는 어긋난다 → 장면 검출 때도 오디오 스트림을 함께 매핑한다
 - ffmpeg scene 점수는 밝기 변화를 본다. 색상만 바뀌는 합성 영상(testsrc2 + hue)으로는 컷이 안 잡히니 테스트 영상은 밝기가 다른 장면으로 만든다
 - 숫자는 읽는 소리대로 바꾼다(고유어 수사: `8곳` → `여덟곳`). 철자와 다르게 읽는 단어는 발음 사전에 넣는다(`KIA` → `기아`)

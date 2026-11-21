@@ -26,6 +26,7 @@ import numpy as np
 
 from app.media.analysis import DEINTERLACE
 from app.media.ffmpeg import ProbeResult, run_ffmpeg
+from app.media.seek import window
 
 WIDTH, HEIGHT = 1280, 720
 AFTER_CUT = 0.5  # seconds after a cut (past blended cut frames)
@@ -117,11 +118,12 @@ def frame_filter(probe: ProbeResult) -> str:
 
 
 def extract_frame(src: Path, probe: ProbeResult, t: float, out: Path, timeout: float = 120) -> Path:
-    """One frame of the original at `t` seconds from the file start (input seeking adds the
-    file's start time, so this is the same axis as cuts and alignment)."""
+    """The frame of the original on screen at `t` seconds from the file start (app/media/seek.py:
+    the same frames the final render starts on)."""
     out.parent.mkdir(parents=True, exist_ok=True)
+    w = window(src, probe, t)
     run_ffmpeg(
-        ["-ss", f"{t:.3f}", "-i", str(src), "-map", "0:v:0", "-vf", frame_filter(probe),
+        [*w.input_args, "-map", "0:v:0", "-vf", f"{w.video_trim},{frame_filter(probe)}",
          "-frames:v", "1", "-q:v", "2", str(out)],
         timeout=timeout,
     )  # fmt: skip

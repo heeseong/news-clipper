@@ -79,6 +79,9 @@ class Clip(TimestampMixin, Base):
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # approved / rejected
     reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     reject_reason: Mapped[str | None] = mapped_column(String(255))
+    # Final render (M6): render_path is set when RENDERED; render_error when the last try failed.
+    rendered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    render_error: Mapped[str | None] = mapped_column(Text)
 
     rundown_item: Mapped[RundownItem] = relationship()
     locker: Mapped[User | None] = relationship(foreign_keys=[locked_by])

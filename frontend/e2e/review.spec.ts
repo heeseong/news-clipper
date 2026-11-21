@@ -69,9 +69,10 @@ test("upload a recording, set a clip's range, fill in the review and approve it"
   await expect(page.getByRole("button", { name: /승인/ })).toBeEnabled();
   await page.locator(".editor-head h1").click();
   await page.keyboard.press("Control+Enter");
+  // Approval starts the final render from the original (M6).
   await expect
-    .poll(async () => (await (await request.get(`${API}/api/clips/${clip.id}`)).json()).status)
-    .toBe("APPROVED");
+    .poll(async () => (await (await request.get(`${API}/api/clips/${clip.id}`)).json()).status, { timeout: 60_000 })
+    .toBe("RENDERED");
   const detail = await (await request.get(`${API}/api/clips/${clip.id}`)).json();
   expect(detail.metadata.title).toBe("E2E 검수 제목[목포MBC 뉴스데스크]");
   const audit = await (await request.get(`${API}/api/clips/${clip.id}/audit`)).json();
@@ -79,4 +80,16 @@ test("upload a recording, set a clip's range, fill in the review and approve it"
     expect.arrayContaining(["range", "metadata", "acknowledge", "approve"]),
   );
   expect(audit[0].user_name).toBe("E2E 검수자");
+
+  // The render plays in the editor and downloads for manual posting.
+  const video = await request.get(`${API}/media/clips/${clip.id}/final.mp4?download=1`);
+  expect(video.status()).toBe(200);
+  expect(video.headers()["content-disposition"]).toContain("attachment");
+  await page.goto(`/jobs/${jobId}/clips/${clip.id}`);
+  await expect(page.getByRole("heading", { name: "렌더 결과" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "영상 내려받기" })).toBeVisible();
+  const duration = await page.locator(".render-video").evaluate(
+    (v: HTMLVideoElement) => new Promise<number>((r) => (v.readyState >= 1 ? r(v.duration) : v.addEventListener("loadedmetadata", () => r(v.duration), { once: true }))),
+  );
+  expect(duration).toBeCloseTo(detail.end_sec - detail.start_sec, 0);
 });

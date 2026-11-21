@@ -119,6 +119,9 @@ class ClipOut(BaseModel):
     reviewed_at: datetime | None = None
     reject_reason: str | None = None
     kind: str = "report"  # report | brief (thumbnail style)
+    rendered_at: datetime | None = None
+    render_error: str | None = None
+    render_url: str | None = None  # the final render (M6), when RENDERED
     locked_by_name: str | None = None  # another reviewer editing it right now
 
 

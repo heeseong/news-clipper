@@ -164,7 +164,8 @@ def test_approval_rules(reviewed, client):
     assert client.post(f"/api/clips/{cid}/approve", headers=A).json()["detail"]["problems"] == ["예약 시각이 지났습니다"]
     client.patch(f"/api/clips/{cid}", json={"clear_publish_at": True}, headers=A)
     r = client.post(f"/api/clips/{cid}/approve", headers=A)
-    assert r.status_code == 200 and r.json()["status"] == "APPROVED" and r.json()["reviewed_at"]
+    # Approval starts the final render (Celery runs in-process here, so it is already done).
+    assert r.status_code == 200 and r.json()["status"] == "RENDERED" and r.json()["reviewed_at"]
     assert client.patch(f"/api/clips/{cid}", json={"title": "또"}, headers=A).status_code == 409
     assert client.post(f"/api/clips/{cid}/reopen", headers=A).json()["status"] == "DRAFT"
     r = client.post(f"/api/clips/{cid}/reject", json={"reason": "중복 기사"}, headers=A)
@@ -191,6 +192,12 @@ def test_bulk_approve_and_schedule(reviewed, client):
     assert not res[ids[2]]["ok"] and res[ids[2]]["problems"] == ["경고를 확인하지 않았습니다"]
     counts = client.get("/api/jobs").json()["items"][0]["clip_counts"]
     assert counts == {"total": 3, "ranged": 3, "approved": 2, "rejected": 0}
+    # Approved (and rendered) clips can still be rescheduled; their content cannot change.
+    later = first + timedelta(days=1)
+    r = client.post("/api/clips/bulk", headers=A, json={
+        "clip_ids": [ids[1], ids[3]], "action": "schedule", "first_at": later.isoformat()})  # fmt: skip
+    assert all(x["ok"] for x in r.json())
+    assert client.patch(f"/api/clips/{ids[1]}", json={"title": "x"}, headers=A).status_code == 409
 
 
 def test_reruns_ask_before_dropping_reviewed_clips(reviewed, client):
@@ -207,3 +214,45 @@ def test_reruns_ask_before_dropping_reviewed_clips(reviewed, client):
     with session_scope() as s:
         assert s.query(AlignedSentence).count() > 0
     assert Path(JobFiles(job_id).clips_dir).exists()
+
+
+def test_approval_renders_and_reopening_discards_it(reviewed, client, monkeypatch):
+    """M6: approve → RENDERED with a playable and downloadable file; a failure can be retried;
+    reopening removes the render."""
+    from app.render import render as render_mod
+
+    job_id, _, ids = reviewed
+    cid = ids[1]
+    d = client.post(f"/api/clips/{cid}/approve", headers=A).json()
+    assert d["status"] == "RENDERED" and d["render_url"] and d["rendered_at"] and d["render_error"] is None
+    final = JobFiles(job_id).final(cid)
+    assert final.exists()
+    r = client.get(d["render_url"])
+    assert r.status_code == 200 and r.headers["content-type"] == "video/mp4"
+    r = client.get(f"/media/clips/{cid}/final.mp4", params={"download": 1})
+    assert "attachment" in r.headers["content-disposition"]
+    with session_scope() as s:
+        clip = s.get(Clip, cid)
+        from app.media.ffmpeg import probe
+
+        assert abs(probe(final).duration - (clip.end_sec - clip.start_sec)) <= 0.1
+    assert client.get("/api/jobs").json()["items"][0]["clip_counts"]["approved"] == 1
+    # Rendered clips are reviewed clips: a re-run asks first.
+    assert client.post(f"/api/jobs/{job_id}/steps/align/retry").status_code == 409
+
+    # A failed render goes back to APPROVED with the reason; "render" tries again.
+    def broken(*a, **k):
+        raise render_mod.RenderError("렌더 길이가 다릅니다")
+
+    monkeypatch.setattr(render_mod, "render_clip", broken)
+    d = client.post(f"/api/clips/{cid}/render", headers=A).json()
+    assert d["status"] == "APPROVED" and "길이" in d["render_error"]
+    monkeypatch.undo()
+    d = client.post(f"/api/clips/{cid}/render", headers=A).json()
+    assert d["status"] == "RENDERED" and d["render_error"] is None
+
+    # Reopening (to change the range) throws the render away.
+    d = client.post(f"/api/clips/{cid}/reopen", headers=A).json()
+    assert d["status"] == "DRAFT" and d["render_url"] is None and not final.exists()
+    assert client.get(f"/media/clips/{cid}/final.mp4").status_code == 404
+    assert client.post(f"/api/clips/{cid}/render", headers=A).status_code == 409

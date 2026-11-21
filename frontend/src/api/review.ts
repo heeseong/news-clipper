@@ -8,7 +8,12 @@ import type { AlignedSentence, AuditEntry, BulkResult, ClipDetail, ClipPatch, Wa
 export const clipKey = (id: number) => ["clip", id] as const;
 
 export function useClipDetail(id: number) {
-  return useQuery({ queryKey: clipKey(id), queryFn: () => api.get<ClipDetail>(`/api/clips/${id}`) });
+  return useQuery({
+    queryKey: clipKey(id),
+    queryFn: () => api.get<ClipDetail>(`/api/clips/${id}`),
+    // Follow the final render after approval (M6).
+    refetchInterval: (q) => (q.state.data && ["APPROVED", "RENDERING"].includes(q.state.data.status) && !q.state.data.render_error ? 2000 : false),
+  });
 }
 
 export function useSentences(id: number, rangeVersion: string) {
@@ -52,7 +57,7 @@ export function usePatchClip(id: number) {
 }
 
 export function useClipAction(id: number) {
-  return useClipMutation(id, (a: { action: "approve" | "reopen" } | { action: "reject"; reason: string }) =>
+  return useClipMutation(id, (a: { action: "approve" | "reopen" | "render" } | { action: "reject"; reason: string }) =>
     api.post<ClipDetail>(`/api/clips/${id}/${a.action}`, a.action === "reject" ? { reason: a.reason } : undefined),
   );
 }

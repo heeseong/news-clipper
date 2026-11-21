@@ -200,3 +200,60 @@ def prepare_clip_after_range(clip_id: int) -> str:
         thumbnails.render_selected(session, clip_id)
     publish_job_changed(job_id)
     return "ok"
+
+
+@celery_app.task(name="clips.render", bind=True, max_retries=1)
+def render_clip(self, clip_id: int) -> str:
+    """Final render of an approved clip from the original (M6, spec 5.6 6-b).
+
+    APPROVED → RENDERING → RENDERED (render_path). A failure is retried once, then the clip goes
+    back to APPROVED with render_error (POST /api/clips/{id}/render tries again). A clip reopened
+    or re-ranged meanwhile keeps nothing of this render."""
+    from app.core.config import get_settings as settings_of
+    from app.media.ffmpeg import FfmpegError, ProbeResult
+    from app.models import Clip, ClipStatus
+    from app.models.base import utcnow
+    from app.render.render import RenderError, RenderOptions
+    from app.render.render import render_clip as render
+    from app.storage import JobFiles
+
+    with session_scope() as session:
+        clip = session.get(Clip, clip_id)
+        if clip is None or clip.status not in (ClipStatus.APPROVED, ClipStatus.RENDERING) or clip.needs_manual_range:
+            return "skipped"
+        job = session.get(Job, clip.job_id)
+        clip.status, clip.render_error = ClipStatus.RENDERING, None
+        job_id, source = job.id, job.source_path
+        track = job.program.audio_track if job.program else None
+        start, end = clip.start_sec, clip.end_sec
+    publish_job_changed(job_id)
+    files = JobFiles(job_id)
+    s = settings_of()
+    out = files.final(clip_id)
+    error = None
+    try:
+        if not source or not files.probe.exists():
+            raise RenderError("원본 영상이 없습니다")
+        probe = ProbeResult.model_validate_json(files.probe.read_text())
+        opts = RenderOptions(
+            max_height=s.render_max_height, crf=s.render_crf, preset=s.render_preset, loudness=s.render_loudness,
+            fade_in=s.render_fade_in, fade_out=s.render_fade_out, timeout=s.ffmpeg_timeout_seconds,
+        )  # fmt: skip
+        render(Path(source), probe, start, end, out, track=track, options=opts)
+    except (FfmpegError, RenderError, OSError) as e:
+        if self.request.retries < self.max_retries and not isinstance(e, RenderError):
+            raise self.retry(exc=e, countdown=5) from e
+        error = str(e)
+        log.warning("render failed", extra={"clip_id": clip_id, "error": error})
+    with session_scope() as session:
+        clip = session.get(Clip, clip_id)
+        current = clip is not None and clip.status == ClipStatus.RENDERING and (clip.start_sec, clip.end_sec) == (start, end)
+        if not current:
+            out.unlink(missing_ok=True)
+            return "stale"
+        if error:
+            clip.status, clip.render_error = ClipStatus.APPROVED, error
+        else:
+            clip.status, clip.render_path, clip.rendered_at = ClipStatus.RENDERED, str(out), utcnow()
+    publish_job_changed(job_id)
+    return "failed" if error else "rendered"

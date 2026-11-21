@@ -23,6 +23,7 @@ const LOW_SCORE = -5; // alignment score below which a sentence is shown as doub
 const LOOP_SECONDS = 3;
 const TITLE_MAX = 100;
 const EDITABLE = ["DRAFT", "NOT_FOUND"];
+const REOPENABLE = ["APPROVED", "RENDERING", "RENDERED", "REJECTED"];
 
 const KEYS: [string, string][] = [
   ["Space", "재생/정지"],
@@ -327,6 +328,7 @@ function Editor({ jobId, fps, duration, clip, clips }: { jobId: number; fps: num
               <p className="small muted">승인 전에: {clip.approval_problems.join(" · ")}</p>
             )}
             {clip.reject_reason && <p className="small">반려 사유: {clip.reject_reason}</p>}
+            <RenderStatus clip={clip} busy={action.isPending} onRender={() => void run(action.mutateAsync({ action: "render" }))} />
             <div className="approve-buttons">
               {editable ? (
                 <>
@@ -345,8 +347,15 @@ function Editor({ jobId, fps, duration, clip, clips }: { jobId: number; fps: num
                   </button>
                 </>
               ) : (
-                ["APPROVED", "REJECTED"].includes(clip.status) && (
-                  <button className="btn" disabled={action.isPending} onClick={() => void run(action.mutateAsync({ action: "reopen" }))}>
+                REOPENABLE.includes(clip.status) && (
+                  <button
+                    className="btn"
+                    disabled={action.isPending}
+                    onClick={() => {
+                      if (!clip.render_url || window.confirm("다시 열면 렌더한 파일을 지웁니다. 계속할까요?"))
+                        void run(action.mutateAsync({ action: "reopen" }));
+                    }}
+                  >
                     다시 열기
                   </button>
                 )
@@ -588,5 +597,36 @@ function AuditList({ clipId, version }: { clipId: number; version: string }) {
         ))}
       </ul>
     </details>
+  );
+}
+
+/** The final render (M6): progress, the result to watch and download, or the error. */
+function RenderStatus({ clip, busy, onRender }: { clip: ClipDetail; busy: boolean; onRender: () => void }) {
+  if (!["APPROVED", "RENDERING", "RENDERED"].includes(clip.status)) return null;
+  if (clip.render_error)
+    return (
+      <div className="render-box">
+        <p className="error-box">렌더 실패: {clip.render_error}</p>
+        <button className="btn btn-small" disabled={busy} onClick={onRender}>다시 렌더</button>
+      </div>
+    );
+  if (clip.status !== "RENDERED" || !clip.render_url)
+    return <p className="small muted render-box">원본 화질로 렌더하는 중입니다…</p>;
+  return (
+    <div className="render-box">
+      <h2>렌더 결과</h2>
+      <video className="render-video" src={clip.render_url} controls preload="metadata" />
+      <div className="small">
+        <a href={`/media/clips/${clip.id}/final.mp4?download=1`}>영상 내려받기</a>
+        {clip.thumbnail_url && (
+          <>
+            {" · "}
+            <a href={clip.thumbnail_url} download={`${clip.item_no}_thumbnail.jpg`}>썸네일 내려받기</a>
+          </>
+        )}
+        {" · "}
+        <button className="link" disabled={busy} onClick={onRender}>다시 렌더</button>
+      </div>
+    </div>
   );
 }

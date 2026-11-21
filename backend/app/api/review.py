@@ -58,6 +58,14 @@ def _done(db, clip: Clip, *, rerender: bool = False) -> ClipDetailOut:
     return clip_detail(clip)
 
 
+def _queue_render(clip_ids: list[int]) -> None:
+    """Final render on the media queue (M6). Runs after the approval is committed."""
+    from app.pipeline.tasks import render_clip
+
+    for clip_id in clip_ids:
+        render_clip.apply_async(args=(clip_id,), queue="media")
+
+
 def _prepare_after_range(clip_id: int) -> None:
     from app.pipeline.tasks import prepare_clip_after_range
 
@@ -107,9 +115,27 @@ def unlock_clip(clip_id: int, db: DbSession, user: Reviewer) -> Response:
 
 @router.post("/clips/{clip_id}/approve", response_model=ClipDetailOut)
 def approve_clip(clip_id: int, db: DbSession, user: Reviewer) -> ClipDetailOut:
+    """Approve; the final render starts right after (spec 5.8)."""
     clip = _clip(db, clip_id)
+    was = clip.status
     _run(review.approve, db, clip, user)
-    return _done(db, clip)
+    out = _done(db, clip)
+    if was != clip.status:
+        _queue_render([clip.id])
+        db.expire_all()
+        out = clip_detail(_clip(db, clip_id))
+    return out
+
+
+@router.post("/clips/{clip_id}/render", response_model=ClipDetailOut)
+def render_again(clip_id: int, db: DbSession, user: Reviewer) -> ClipDetailOut:
+    """Render an approved clip again (after a failure, or to redo it)."""
+    clip = _clip(db, clip_id)
+    _run(review.request_render, db, clip, user)
+    _done(db, clip)
+    _queue_render([clip.id])
+    db.expire_all()
+    return clip_detail(_clip(db, clip_id))
 
 
 @router.post("/clips/{clip_id}/reject", response_model=ClipDetailOut)
@@ -215,6 +241,7 @@ def bulk(body: BulkIn, db: DbSession, user: Reviewer) -> list[BulkResultOut]:
     if len(clips) != len(set(body.clip_ids)):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "없는 클립이 있습니다")
     results = []
+    approved: list[int] = []
     if body.action == "schedule":
         if body.first_at is None:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "첫 예약 시각(first_at)이 필요합니다")
@@ -229,8 +256,11 @@ def bulk(body: BulkIn, db: DbSession, user: Reviewer) -> list[BulkResultOut]:
     else:
         for clip in clips:
             try:
+                was = clip.status
                 review.approve(db, clip, user)
                 results.append(BulkResultOut(clip_id=clip.id, ok=True))
+                if was != clip.status:
+                    approved.append(clip.id)
             except review.NotApprovable as e:
                 results.append(BulkResultOut(clip_id=clip.id, ok=False, error=str(e), problems=e.problems))
             except review.ReviewError as e:
@@ -238,6 +268,7 @@ def bulk(body: BulkIn, db: DbSession, user: Reviewer) -> list[BulkResultOut]:
     db.commit()
     for job_id in {c.job_id for c in clips}:
         publish_job_changed(job_id)
+    _queue_render(approved)
     return results
 
 
