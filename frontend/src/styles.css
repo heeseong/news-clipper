@@ -1007,3 +1007,14 @@ label.inline {
 .channel-picker label.inline {
   flex-direction: row;
 }
+
+/* --- administration (M9) --- */
+.tabs {
+  margin-bottom: 0.8rem;
+}
+.program-form {
+  max-width: 56rem;
+}
+.metric-value {
+  font-size: 1.5rem;
+}

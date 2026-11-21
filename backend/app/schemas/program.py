@@ -50,3 +50,19 @@ class ProgramOut(ProgramIn):
     default_tags: list[str]
     default_channels: list[int]
     thumbnail_template: dict[str, Any]
+
+
+class ProgramPatchIn(BaseModel):
+    """Partial update (the admin screen, M9.1): only the fields sent change."""
+
+    name: str | None = Field(None, min_length=1, max_length=100)
+    broadcast_time: time | None = None
+    audio_track: int | None = Field(None, ge=0)
+    pronunciations: dict[str, str] | None = None
+    dedupe_program: str | None = None
+    excluded_sources: list[str] | None = None
+    title_template: str | None = None
+    description_footer: str | None = None
+    default_tags: list[str] | None = None
+    default_channels: list[int] | None = None
+    thumbnail_template: dict[str, Any] | None = None

@@ -52,6 +52,7 @@ class JobOut(BaseModel):
     is_dummy: bool
     cue_sheet_id: int | None = None  # picked by the user (upload form or refresh)
     clip_counts: ClipCounts = ClipCounts()
+    purged: dict[str, str] = {}  # retention cleanup: {"source": iso time, "work": iso time}
     created_at: datetime
     updated_at: datetime
 

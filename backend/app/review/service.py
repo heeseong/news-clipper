@@ -299,6 +299,9 @@ def approval_problems(session: Session, clip: Clip, now: datetime | None = None)
         problems.append("썸네일이 선택되지 않았습니다")
     if warnings_of(clip, meta) and not clip.warnings_acknowledged:
         problems.append("경고를 확인하지 않았습니다")
+    job = session.get(Job, clip.job_id)
+    if job is not None and "source" in (job.purged or {}):
+        problems.append("원본 영상이 보존 기간이 지나 삭제돼 렌더할 수 없습니다")
     return problems
 
 

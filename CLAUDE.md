@@ -5,7 +5,7 @@
 
 ## 먼저 읽을 것
 - `spec.md` — 기능 명세(v1.3). 정렬·경계 규칙의 근거는 5.5절, 업로드·재시도는 5.9~5.10절
-- `plan.md` — 마일스톤과 진행 상태. M0~M6 구현(로그인 보류, M3는 원래 골든셋 4편 재현, M4는 실제 Claude 호출·HD 녹화본 확인이 남음, M6는 HD 원본 렌더 시간 확인이 남음). **M7(YouTube 업로드·예약 발행)** 완료(테스트 채널에서 예약 공개 확인). **M8(상태 확인·재시도)** 완료(외부 알림은 하지 않음, 업로드 뒤 수정은 YouTube에 자동 반영). 다음 작업은 **M9(운영 준비)**. 각 마일스톤의 "정한 것"에 규칙이 있다
+- `plan.md` — 마일스톤과 진행 상태. M0~M6 구현(로그인 보류, M3는 원래 골든셋 4편 재현, M4는 실제 Claude 호출·HD 녹화본 확인이 남음, M6는 HD 원본 렌더 시간 확인이 남음). **M7(YouTube 업로드·예약 발행)** 완료(테스트 채널에서 예약 공개 확인). **M8(상태 확인·재시도)** 완료(외부 알림은 하지 않음, 업로드 뒤 수정은 YouTube에 자동 반영). **M9(운영 준비)** 진행 중: 9.1~9.4 구현(관리 화면, 보존 정리, 운영 지표, 배포 문서·백업), 남은 것은 파일럿(9.5)과 운영 서버 배포 — M9 절 참고. 각 마일스톤의 "정한 것"에 규칙이 있다
 - `eval/poc/RESULTS.md` — 정렬 PoC 결과와 방송별 실패 사례
 
 ## 핵심 결정 (바꾸기 전에 사용자와 확인)
@@ -20,11 +20,12 @@
 - 썸네일: 리포트는 대표 프레임 + 템플릿 이미지(나중에 교체) + 제목 두 줄, 단신은 앵커 샷 뒤 하단 제목 자막이 처음 뜬 화면 그대로(2026-11-20)
 - 검수: 승인 → 원본 화질 자동 렌더(페이드 없음, 첫 프레임 = 검수에서 지정한 프레임) → 클립의 채널로 자동 업로드(채널 없으면 렌더까지만). 승인 뒤 구간·내용을 고치려면 "다시 열기"(렌더 삭제, 플랫폼에 올라간 영상이 있으면 먼저 업로드 취소). 발행 설정(공개 범위·예약·채널)은 업로드가 시작되기 전까지 변경 가능
 - 업로드(M7): 채널마다 `PublishTask`, 클립 상태는 가장 덜 진행된 작업을 따른다. YouTube 할당량은 Google Cloud 프로젝트 단위(태평양 시간 자정 초기화), 그와 별도로 **채널의 하루 업로드 개수 한도**가 있다(테스트 채널 10건, `uploadLimitExceeded` → 그 채널만 미룸). 채널 연결은 기기 코드 방식(OAuth 클라이언트 "TV 및 입력 제한 기기"), 토큰은 `TOKEN_ENCRYPTION_KEY`로 암호화
+- M9 결정(2026-11-21): **로그인 없음**(이름만, 사내망 전용). 보존 정리는 기본 꺼짐(`RETENTION_ENABLED`), 원본 30일·작업 파일 90일·렌더는 모두 게시 후 30일
 - M8 결정(2026-11-21): 업로드 뒤 메타데이터·썸네일을 고치면 YouTube에 **자동 반영**(`videos.update`는 영상을 먼저 읽고 바꾸는 항목만 합쳐 보낸다 — 그대로 보내면 퍼가기·통계 공개 설정이 꺼진다). 채널·구간은 업로드 취소 후, 게시된 영상의 예약 시각은 변경 불가. 상태 확인은 1·2·4·8·10분 간격 + 게시 뒤 10분·1시간·6시간·24시간. 외부 알림(Slack·메일)은 만들지 않는다. YouTube 운영 한도는 사용자가 나중에 확인
 
 ## 저장소 구조 (현재)
 - `backend/app/core/` — 설정(`config.py`, 환경변수), JSON 로깅, DB 세션
-- `backend/app/models/` — SQLAlchemy 모델(User, ProgramProfile, Job, JobStep, Rundown, RundownItem, Clip, AlignedSentence, ClipMetadata, Thumbnail, AuditLog, Channel, OAuthSession, PublishTask, QuotaUsage). 바꾸면 Alembic 마이그레이션(`backend/alembic/versions/00NN_설명.py`, 현재 0012)도 만든다
+- `backend/app/models/` — SQLAlchemy 모델(User, ProgramProfile, Job, JobStep, Rundown, RundownItem, Clip, AlignedSentence, ClipMetadata, Thumbnail, AuditLog, Channel, OAuthSession, PublishTask, QuotaUsage). 바꾸면 Alembic 마이그레이션(`backend/alembic/versions/00NN_설명.py`, 현재 0013)도 만든다
 - `backend/app/pipeline/` — 단계 정의(`definition.py`), 상태 전이(`orchestrator.py`, Celery 없음), Celery 태스크(`tasks.py`), 단계 처리기(`handlers.py`, `@register("proxy")`). 처리기가 없는 단계는 SKIPPED
 - `backend/app/media/` — ffprobe·ffmpeg 래퍼(`ffmpeg.py`), 프록시·스프라이트·파형(`proxy.py`), 정렬용 오디오·장면 전환·무음(`analysis.py`)
 - `backend/app/uploads.py`, `api/uploads.py` — tus 업로드. `intake.py` — 업로드 → 작업 생성(ffprobe 검증, 경고). `storage.py` — 저장 경로
@@ -39,9 +40,10 @@
 - `backend/app/review/` — 검수(M5): 검수자(헤더 `X-Reviewer`, 로그인 전 임시), 잠금, 구간·메타 수정, 썸네일 선택·추가, 승인·반려·다시 열기, 재실행 보호, 감사 로그. 라우터 `api/review.py`
 - `backend/app/render/` — 최종 렌더(M6): 원본에서 프레임 정확 자르기, loudnorm 2-pass, 검증. 승인하면 `clips.render` 태스크(media 큐). `backend/app/media/seek.py` — 렌더·썸네일 프레임이 함께 쓰는 정확한 구간 접근(거친 입력 탐색 + `-copyts` + `trim`)
 - `backend/app/publish/` — 업로드(M7): Publisher 인터페이스(`base.py`), 가짜 플랫폼(`fake.py`), YouTube 어댑터(`youtube.py`, httpx), Google OAuth(`oauth.py`), 채널 연결(`channels.py`), 토큰 암호화(`crypto.py`), 할당량(`quota.py`), 선택·토큰 갱신(`factory.py`), 업로드 흐름·재시도·상태 확인·업로드 뒤 수정 반영(`service.py`), Celery 태스크(`tasks.py`, publish 큐 + beat `publish.sweep` 1분). 라우터 `api/channels.py`, `api/publish.py`. 설정 `PUBLISHER=fake|youtube`
+- `backend/app/maintenance/` — 운영(M9): 보존 정리(`cleanup.py`, beat 매일 03:17), 운영 지표(`metrics.py`), 태스크(`tasks.py`). 라우터 `api/admin.py`(`/api/admin/storage`, `/cleanup`, `/metrics`)
 - `backend/tests/` — 단위 테스트. `tests/fixtures/synthetic.py`는 FFmpeg 합성 테스트 영상(컷·무음 위치를 알고 있음)
-- `frontend/` — React + Vite + TS. `src/api/`(API 클라이언트·TanStack Query 훅), `src/pages/`(작업 목록·상세, 업로드, 클립 편집기 `ClipEditorPage`, 게시 현황 `PublishPage`, 채널 `ChannelsPage`), `e2e/`(Playwright E2E, `npm run e2e`)
-- `docker-compose.yml` — 서버 한 대 배포(postgres, redis, migrate, api, 워커 4개, beat, web)
+- `frontend/` — React + Vite + TS. `src/api/`(API 클라이언트·TanStack Query 훅), `src/pages/`(작업 목록·상세, 업로드, 클립 편집기 `ClipEditorPage`, 게시 현황 `PublishPage`, 채널 `ChannelsPage`, 관리 `AdminPage`), `e2e/`(Playwright E2E, `npm run e2e`)
+- `docker-compose.yml` — 서버 한 대 배포(postgres, redis, migrate, api, 워커 4개, beat, web). `README.md` — 구성, 실행, 주요 설정. `docs/deploy.md` — 배포·HTTPS·업데이트·보존·백업·복원·점검표, `ops/backup.sh` — DB·템플릿·.env 백업
 - `eval/tools/` — MARS-L 출력물(PDF) → API 형식 JSON 변환기(API 키를 받기 전 임시용), 파싱 검토 리포트 생성
 - `eval/poc/` — 정렬 PoC 스크립트(`compute_logits.py`, `align_poc.py`). 서비스 코드는 `backend/app/align/`
 - `eval/tools/score_alignment.py` — 서비스 정렬을 녹화본 한 편에 돌려 `ground_truth.json`과 비교(골든셋 회귀)

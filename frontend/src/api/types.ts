@@ -49,6 +49,7 @@ export interface Job {
   source_size: number | null;
   warnings: string[];
   is_dummy: boolean;
+  purged: Record<string, string>;
   cue_sheet_id: number | null;
   clip_counts: { total: number; ranged: number; approved: number; rejected: number; uploaded: number; upload_failed: number };
   created_at: string;
@@ -117,7 +118,14 @@ export interface Program {
   excluded_sources: string[];
   dedupe_program: string | null;
   default_channels: number[];
+  pronunciations: Record<string, string>;
+  title_template: string | null;
+  description_footer: string | null;
+  default_tags: string[];
+  thumbnail_template: Record<string, unknown>;
 }
+
+export type ProgramPatch = Partial<Omit<Program, "id">>;
 
 // --- newsroom (backend/app/schemas/newsroom.py) ---
 
@@ -223,6 +231,7 @@ export interface Clip {
   locked_by_name: string | null;
   rendered_at: string | null;
   render_error: string | null;
+  render_purged_at: string | null;
   render_url: string | null;
   remote_urls: string[];
 }
@@ -419,4 +428,56 @@ export interface PublishTask {
 export interface PublishSummary {
   channels: { channel: Channel; queued: number; uploading: number; scheduled_today: number; published_today: number; failed: number }[];
   quota: { platform: string; day: string; used: number; limit: number; resets_at: string; uploads_left: number }[];
+}
+
+// --- administration (backend/app/api/admin.py, M9) ---
+
+export interface CleanupItem {
+  kind: "source" | "work" | "render" | "upload";
+  job_id: number | null;
+  clip_id: number | null;
+  upload_id: string | null;
+  bytes: number;
+  reason: string;
+  paths: string[];
+}
+
+export interface StorageInfo {
+  usage: { source: number; work: number; render: number; uploads: number; other: number };
+  retention: { enabled: boolean; source_days: number; work_days: number; render_days: number; upload_hours: number };
+  plan: CleanupItem[];
+  plan_count: number;
+  plan_bytes: number;
+}
+
+export interface JobMetrics {
+  job_id: number;
+  program: string | null;
+  broadcast_date: string | null;
+  duration: number | null;
+  pipeline_seconds: number | null;
+  steps: Record<string, number>;
+  retried_steps: number;
+  clips: number;
+  auto: number;
+  auto_moved: number;
+  manual: number;
+  no_range: number;
+  approved: number;
+  rejected: number;
+  titles_edited: number;
+  llm_input_tokens: number;
+  llm_output_tokens: number;
+  uploads: number;
+  published: number;
+  on_platform: number;
+  upload_failed: number;
+  upload_retries: number;
+}
+
+export interface MetricsSummary {
+  days: number;
+  since: string;
+  totals: Record<string, number | null> & { median_step_seconds: Record<string, number> };
+  jobs: JobMetrics[];
 }

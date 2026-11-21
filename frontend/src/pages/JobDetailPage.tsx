@@ -73,6 +73,12 @@ export function JobDetailPage() {
       {data.error && (
         <p className={data.status === "WAITING_RUNDOWN" ? "warn-box" : "error-box"}>{data.error}</p>
       )}
+      {(data.purged?.source || data.purged?.work) && (
+        <p className="warn-box small">
+          보존 기간이 지나 {[data.purged.source && "원본", data.purged.work && "프록시·작업 파일"].filter(Boolean).join("과 ")}을 지웠습니다
+          {data.purged.source && " (다시 렌더할 수 없습니다)"}.
+        </p>
+      )}
 
       <div className="stages">
         {stages.map((stage, i) => (

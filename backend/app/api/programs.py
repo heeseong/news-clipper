@@ -13,7 +13,7 @@ from sqlalchemy import select
 from app.api.deps import DbSession
 from app.models import ProgramProfile
 from app.models.program import DEFAULT_DEDUPE_PROGRAM
-from app.schemas.program import ProgramIn, ProgramOut
+from app.schemas.program import ProgramIn, ProgramOut, ProgramPatchIn
 from app.thumbnails import overlay
 from app.thumbnails.overlay import unknown_keys
 
@@ -87,6 +87,37 @@ def update_program(program_id: int, body: ProgramIn, db: DbSession) -> ProgramPr
     if body.pronunciations is not None:
         program.pronunciations = {k.strip(): v.strip() for k, v in body.pronunciations.items() if k.strip()}
     _apply_metadata_settings(program, body, db)
+    db.commit()
+    return program
+
+
+@router.patch("/{program_id}", response_model=ProgramOut)
+def patch_program(program_id: int, body: ProgramPatchIn, db: DbSession) -> ProgramProfile:
+    """Change only the fields sent (the admin screen). '' clears a text field; null clears the
+    broadcast time or the audio track."""
+    program = db.get(ProgramProfile, program_id)
+    if program is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "프로그램을 찾을 수 없습니다")
+    sent = body.model_fields_set
+    if "name" in sent and body.name:
+        name = body.name.strip()
+        other = db.scalar(select(ProgramProfile).where(ProgramProfile.name == name, ProgramProfile.id != program.id))
+        if other:
+            raise HTTPException(status.HTTP_409_CONFLICT, f"이미 있는 프로그램입니다: {name}")
+        program.name = name
+    if "broadcast_time" in sent:
+        program.broadcast_time = body.broadcast_time
+    if "audio_track" in sent:
+        program.audio_track = body.audio_track
+    if "excluded_sources" in sent and body.excluded_sources is not None:
+        program.excluded_sources = _sources(body.excluded_sources)
+    if "dedupe_program" in sent:
+        program.dedupe_program = (body.dedupe_program or "").strip() or None
+    if "pronunciations" in sent and body.pronunciations is not None:
+        program.pronunciations = {k.strip(): v.strip() for k, v in body.pronunciations.items() if k.strip() and v.strip()}
+    full = ProgramIn(name=program.name, **{k: getattr(body, k) for k in sent if k in (
+        "title_template", "description_footer", "default_tags", "default_channels", "thumbnail_template")})  # fmt: skip
+    _apply_metadata_settings(program, full, db)
     db.commit()
     return program
 

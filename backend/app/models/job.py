@@ -74,6 +74,8 @@ class Job(TimestampMixin, Base):
     params: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     # Non-blocking problems found at upload (date mismatch, duplicate file, ...)
     warnings: Mapped[list[str]] = mapped_column(JSON, default=list, server_default=text("'[]'"))
+    # Retention cleanup (M9.2): what was deleted and when, e.g. {"source": "2026-12-21T03:17:00+00:00"}
+    purged: Mapped[dict[str, str]] = mapped_column(JSON, default=dict, server_default=text("'{}'"))
 
     program: Mapped[ProgramProfile | None] = relationship(lazy="joined")
     steps: Mapped[list[JobStep]] = relationship(
