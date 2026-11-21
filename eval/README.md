@@ -3,10 +3,16 @@
 Tools for checking the pipeline against real broadcasts. Real material
 (recordings, cue sheets, scripts) lives in `eval/data/`, which is git-ignored.
 
+Pilot procedure (plan.md M9 "M9 남은 작업 가이드"): get the recording, fetch the cue sheet and
+scripts, **write `ground_truth.json` before running anything (blind)**, score, record the result in
+`poc/RESULTS.md`. Changing an alignment constant means re-scoring every golden set.
+
 ## Cue sheet and script (MARS-L)
 
-Until MARS-L API access is available, cue sheets and scripts come from the
-MARS-L print-outs (PDF).
+The MARS-L API is available (key stored as the environment's network secret, since 2026-11-20):
+`items.json` should come from IF_MARSL_003 — a small `tools/fetch_marsl.py` (date + program →
+`items.json`) is still to be written for the pilot. Older golden sets came from the MARS-L
+print-outs (PDF):
 
 ```bash
 # 1. PDF print-outs -> API-shaped JSON (cuesheet.json, items.json, pdf_extra.json)
@@ -39,3 +45,11 @@ cd backend && .venv/bin/python ../eval/tools/score_alignment.py ../eval/data/202
 DATA_DIR holds `items.json` (IF_MARSL_003 response), the recording, and optionally
 `ground_truth.json`; intermediate files are cached in `DATA_DIR/work/`. See the script's
 docstring for the ground-truth format. Needs the `model` extra (torch, transformers).
+
+Ground truth covers every upload target, reports **and straight briefs** (since 2026-11-20).
+The tool does not apply the 뉴스투데이 rule that drops items aired the previous evening
+(`backend/app/newsroom/dedupe.py`): leave those items out of the ground truth.
+
+Golden sets so far (`poc/RESULTS.md`): 11-02, 11-04, 11-05, 11-11 (PoC code), 11-16, 11-19
+(service code, 10/10 report boundaries each). No 뉴스투데이 recording yet; briefs have no blind
+reference yet.
