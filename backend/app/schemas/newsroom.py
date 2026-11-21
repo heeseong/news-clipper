@@ -114,6 +114,12 @@ class ClipOut(BaseModel):
     needs_manual_range: bool
     youtube_title: str | None = None  # metadata title, once generated
     thumbnail_url: str | None = None  # selected frame with the text overlay
+    warnings_acknowledged: bool = False
+    edited_at: datetime | None = None
+    reviewed_at: datetime | None = None
+    reject_reason: str | None = None
+    kind: str = "report"  # report | brief (thumbnail style)
+    locked_by_name: str | None = None  # another reviewer editing it right now
 
 
 class AlignedSentenceOut(BaseModel):
@@ -147,6 +153,7 @@ class ClipMetadataOut(BaseModel):
     thumbnail_text_candidates: list[TextCandidateOut]
     privacy: str
     publish_at: datetime | None
+    channel_ids: list[int] = []
     llm_status: str  # ok | failed | off
     llm_provider: str | None
     llm_model: str | None
@@ -173,3 +180,57 @@ class ThumbnailOut(BaseModel):
 class ClipDetailOut(ClipOut):
     metadata: ClipMetadataOut | None = None
     thumbnails: list[ThumbnailOut] = []
+    approval_problems: list[str] = []  # empty = can be approved
+    lock_expires_at: datetime | None = None
+
+
+class ClipPatchIn(BaseModel):
+    """Reviewer edits (spec 8 PATCH /api/clips/{id}). Fields left out are unchanged."""
+
+    start_sec: float | None = None
+    end_sec: float | None = None
+    title: str | None = None
+    description: str | None = None
+    tags: list[str] | None = None
+    hashtags: list[str] | None = None
+    thumbnail_text: str | None = Field(None, max_length=255)
+    privacy: str | None = None
+    publish_at: datetime | None = None
+    clear_publish_at: bool = False  # publish when processed instead of at publish_at
+    channel_ids: list[int] | None = None
+    warnings_acknowledged: bool | None = None
+
+
+class FrameThumbnailIn(BaseModel):
+    frame_sec: float = Field(ge=0)
+
+
+class RejectIn(BaseModel):
+    reason: str | None = None
+
+
+class BulkIn(BaseModel):
+    clip_ids: list[int] = Field(min_length=1)
+    action: str = Field(pattern="^(approve|schedule)$")
+    # schedule: the first clip (in cue sheet order) at first_at, then every interval_minutes
+    first_at: datetime | None = None
+    interval_minutes: int = Field(10, ge=1, le=24 * 60)
+    privacy: str | None = None  # visibility once published
+
+
+class BulkResultOut(BaseModel):
+    clip_id: int
+    ok: bool
+    error: str | None = None
+    problems: list[str] = []
+    publish_at: datetime | None = None
+
+
+class AuditOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    user_name: str | None = None
+    action: str
+    diff: dict[str, Any]
+    created_at: datetime

@@ -54,6 +54,21 @@ def load_model(model_id: str) -> tuple[Any, Any]:
         return _loaded[model_id]
 
 
+FAKE_SILENT = "fake:silent"
+
+
+def silent(wav: Path) -> LogProbs:
+    import wave
+
+    with wave.open(str(wav)) as w:
+        seconds = w.getnframes() / w.getframerate()
+    frame = 0.02
+    vocab = ["<pad>", "|", *"가나다라마바사아자차카타파하"]
+    lpz = np.full((max(1, int(round(seconds / frame))), len(vocab)), -12.0, dtype=np.float32)
+    lpz[:, 0] = -0.05
+    return LogProbs(lpz=lpz, frame_sec=frame, offset=0.0, vocab=vocab, blank=0)
+
+
 def compute_logprobs(
     wav: Path,
     model_id: str,
@@ -64,7 +79,12 @@ def compute_logprobs(
     on_progress: Callable[[float], None] | None = None,
 ) -> LogProbs:
     """Log-probabilities for a 16 kHz mono WAV, computed in chunks with a little context on each
-    side so chunk edges are not cut mid-syllable (same method as eval/poc/compute_logits.py)."""
+    side so chunk edges are not cut mid-syllable (same method as eval/poc/compute_logits.py).
+
+    ALIGN_MODEL=fake:silent hears nothing (every item is NOT_FOUND and needs a manual range): the
+    Fake for end-to-end tests and machines without PyTorch."""
+    if model_id == FAKE_SILENT:
+        return silent(wav)
     import soundfile as sf
     import torch
 

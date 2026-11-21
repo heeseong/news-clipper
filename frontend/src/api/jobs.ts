@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { api } from "./client";
+import { api, withReviewGuard } from "./client";
 import { useLive } from "./events";
 import type {
   Analysis,
@@ -78,7 +78,8 @@ export function useCreateDummyJob() {
 export function useRetryStep(jobId: number) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (step: string) => api.post<JobDetail>(`/api/jobs/${jobId}/steps/${step}/retry`),
+    mutationFn: (step: string) =>
+      withReviewGuard((force) => api.post<JobDetail>(`/api/jobs/${jobId}/steps/${step}/retry${force ? "?force=true" : ""}`)),
     onSuccess: (job) => {
       qc.setQueryData(["jobs", jobId], job);
       qc.invalidateQueries({ queryKey: ["jobs"] });

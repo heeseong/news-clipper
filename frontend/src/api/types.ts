@@ -50,6 +50,7 @@ export interface Job {
   warnings: string[];
   is_dummy: boolean;
   cue_sheet_id: number | null;
+  clip_counts: { total: number; ranged: number; approved: number; rejected: number };
   created_at: string;
   updated_at: string;
 }
@@ -213,6 +214,12 @@ export interface Clip {
   needs_manual_range: boolean;
   youtube_title: string | null;
   thumbnail_url: string | null;
+  warnings_acknowledged: boolean;
+  edited_at: string | null;
+  reviewed_at: string | null;
+  reject_reason: string | null;
+  kind: "report" | "brief";
+  locked_by_name: string | null;
 }
 
 export interface TextCandidate {
@@ -232,6 +239,7 @@ export interface ClipMetadata {
   thumbnail_text_candidates: TextCandidate[];
   privacy: string;
   publish_at: string | null;
+  channel_ids: number[];
   llm_status: "ok" | "failed" | "off";
   llm_provider: string | null;
   llm_model: string | null;
@@ -256,6 +264,53 @@ export interface ThumbnailCandidate {
 export interface ClipDetail extends Clip {
   metadata: ClipMetadata | null;
   thumbnails: ThumbnailCandidate[];
+  approval_problems: string[];
+  lock_expires_at: string | null;
+}
+
+export interface AlignedSentence {
+  seq: number;
+  section: string;
+  kind: string;
+  text: string;
+  start_sec: number;
+  end_sec: number;
+  score: number;
+}
+
+export interface ClipPatch {
+  start_sec?: number;
+  end_sec?: number;
+  title?: string;
+  description?: string;
+  tags?: string[];
+  hashtags?: string[];
+  thumbnail_text?: string;
+  privacy?: string;
+  publish_at?: string | null;
+  clear_publish_at?: boolean;
+  warnings_acknowledged?: boolean;
+}
+
+export interface BulkResult {
+  clip_id: number;
+  ok: boolean;
+  error: string | null;
+  problems: string[];
+  publish_at: string | null;
+}
+
+export interface AuditEntry {
+  id: number;
+  user_name: string | null;
+  action: string;
+  diff: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface Waveform {
+  rate: number;
+  peaks: number[];
 }
 
 export interface RundownChange {

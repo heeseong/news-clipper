@@ -144,3 +144,21 @@ export const SNAP_LABEL: Record<string, string> = {
   next_item_cut: "다음 앵커 컷",
   manual: "수동",
 };
+
+export const CLIP_STATUS_LABEL: Record<string, string> = {
+  DRAFT: "검수 전",
+  NOT_FOUND: "구간 지정 필요",
+  APPROVED: "승인",
+  REJECTED: "반려",
+};
+
+/** Snap a dragged boundary to a scene cut nearby: a clip starts one frame after a cut and ends
+ * half a frame before one (the same rule as the automatic boundaries). */
+export function snapToCut(t: number, edge: "in" | "out", cuts: number[], fps: number, within = 0.25): number {
+  let best: number | null = null;
+  for (const c of cuts) {
+    const target = edge === "in" ? c + 1 / fps : c - 0.5 / fps;
+    if (Math.abs(target - t) <= within && (best === null || Math.abs(target - t) < Math.abs(best - t))) best = target;
+  }
+  return best ?? t;
+}

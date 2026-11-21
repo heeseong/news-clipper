@@ -85,11 +85,61 @@ def make_candidates(
 
 
 def store(session: Session, clip_id: int, rows: list[dict]) -> None:
-    session.execute(delete(Thumbnail).where(Thumbnail.clip_id == clip_id))
+    """Replace the candidates. Frames the reviewer added (current frame, upload) stay; the best
+    candidate is selected unless one of those is."""
+    session.execute(delete(Thumbnail).where(Thumbnail.clip_id == clip_id, Thumbnail.source == "candidate"))
+    manual_selected = session.scalar(
+        select(Thumbnail.id).where(Thumbnail.clip_id == clip_id, Thumbnail.selected)
+    )
     session.add_all(
-        Thumbnail(clip_id=clip_id, source="candidate", selected=row["rank"] == 1, **row) for row in rows
+        Thumbnail(clip_id=clip_id, source="candidate", selected=row["rank"] == 1 and manual_selected is None, **row)
+        for row in rows
     )
     session.flush()
+
+
+def manual_path(job_id: int, clip_id: int, name: str) -> Path:
+    """Frames the reviewer picked or uploaded (kept when candidates are made again)."""
+    return JobFiles(job_id).clip_dir(clip_id) / "thumb_manual" / name
+
+
+def save_uploaded(data: bytes, out: Path) -> Path:
+    """An uploaded image as a 1280x720 JPG: cropped to 16:9 around the centre, then scaled."""
+    import io
+
+    from PIL import Image
+
+    img = Image.open(io.BytesIO(data))
+    img.load()
+    img = img.convert("RGB")
+    w, h = img.size
+    target = overlay.WIDTH / overlay.HEIGHT
+    if w / h > target:
+        nw = round(h * target)
+        img = img.crop(((w - nw) // 2, 0, (w - nw) // 2 + nw, h))
+    else:
+        nh = round(w / target)
+        img = img.crop((0, (h - nh) // 2, w, (h - nh) // 2 + nh))
+    img = img.resize((overlay.WIDTH, overlay.HEIGHT), Image.LANCZOS)
+    return overlay.save_jpeg(img, out)
+
+
+def template_of(session: Session, clip: Clip) -> dict:
+    job = session.get(Job, clip.job_id)
+    return overlay.template_for(clip_kind(clip), job.program.thumbnail_template if job.program else None)
+
+
+def preview(session: Session, clip: Clip, text: str | None, thumbnail_id: int | None = None):
+    """The thumbnail as it would look with `text` (the saved text when None), not saved."""
+    q = select(Thumbnail).where(Thumbnail.clip_id == clip.id)
+    q = q.where(Thumbnail.id == thumbnail_id) if thumbnail_id else q.where(Thumbnail.selected)
+    thumb = session.scalar(q)
+    if thumb is None or not Path(thumb.path).exists():
+        return None
+    if text is None:
+        meta = session.get(ClipMetadata, clip.id)
+        text = meta.thumbnail_text if meta else ""
+    return overlay.render(Path(thumb.path), text, template_of(session, clip))
 
 
 def render_selected(session: Session, clip_id: int) -> Path | None:
@@ -99,9 +149,9 @@ def render_selected(session: Session, clip_id: int) -> Path | None:
     thumb = session.scalar(select(Thumbnail).where(Thumbnail.clip_id == clip_id, Thumbnail.selected))
     if clip is None or meta is None or thumb is None or not Path(thumb.path).exists():
         return None
-    job = session.get(Job, clip.job_id)
-    template = overlay.template_for(clip_kind(clip), job.program.thumbnail_template if job.program else None)
-    out = overlay.render_to(Path(thumb.path), meta.thumbnail_text, JobFiles(clip.job_id).thumbnail(clip_id), template)
+    out = overlay.render_to(
+        Path(thumb.path), meta.thumbnail_text, JobFiles(clip.job_id).thumbnail(clip_id), template_of(session, clip)
+    )
     thumb.overlay_text = meta.thumbnail_text
     session.flush()
     return out
