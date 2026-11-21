@@ -113,6 +113,13 @@ services:
     command: ["celery", "-A", "app.worker", "worker", "-Q", "publish", "-c", "${PUBLISH_CONCURRENCY:-2}", "-n", "publish@%h"]
     depends_on: *worker-deps
 
+  # Every minute: upload retries, uploads waiting for the next quota day, YouTube status checks (M7).
+  # Exactly one beat per deployment.
+  beat:
+    <<: *backend
+    command: ["celery", "-A", "app.worker", "beat", "-s", "/tmp/celerybeat-schedule"]
+    depends_on: *worker-deps
+
   web:
     build: ./frontend
     image: news-clipper-web

@@ -9,6 +9,7 @@ export CELERY_ALWAYS_EAGER=true
 export NEWSROOM_PROVIDER=fake
 export ALIGN_MODEL=fake:silent
 export LLM_PROVIDER=fake
+export PUBLISHER=fake
 export LOG_FORMAT=console
 export CORS_ORIGINS=http://localhost:5174
 PY=${PYTHON:-.venv/bin/python}

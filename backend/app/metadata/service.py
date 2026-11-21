@@ -138,7 +138,11 @@ def generate(
 
 def store(session: Session, clip: Clip, g: Generated) -> ClipMetadata:
     """Create or overwrite the clip's metadata. Publishing settings are kept."""
-    meta = session.get(ClipMetadata, clip.id) or ClipMetadata(clip_id=clip.id)
+    meta = session.get(ClipMetadata, clip.id)
+    if meta is None:
+        meta = ClipMetadata(clip_id=clip.id)
+        program = session.get(Job, clip.job_id).program
+        meta.channel_ids = list(program.default_channels or []) if program else []  # M7: program's channels
     meta.title = g.title
     meta.title_candidates = g.title_candidates
     meta.description = g.description

@@ -2,7 +2,9 @@
 
 - title: the cleaned script title in the program's title template, by default
   "{title}[{station} {program}]" → "…원고 제목[목포MBC 뉴스데스크]" like the channel (2026-11-21)
-- description: the anchor lead (a brief: its whole text) + the program's footer template
+- description: "[목포MBC 뉴스]" + the script as written in the newsroom (2026-11-21, user decision;
+  before: the anchor lead + a footer), within YouTube's 5,000 bytes. The program's footer template
+  is added only when set; the hashtags are added at the end on upload
 - tags: program default tags + reporter + region names found in the script (+ LLM keywords later)
 - thumbnail text: the script memo is always empty in the real API, so the title (see thumbnail_text)
 """
@@ -21,6 +23,8 @@ YOUTUBE_TAGS_MAX_CHARS = 500  # all tags together
 DEFAULT_TITLE_TEMPLATE = "{title}[{station} {program}]"
 YOUTUBE_TITLE_MAX = 100
 DEFAULT_FOOTER = "{reporter_credit}\n{station} {program} {date} 방송"
+# The description starts with this line, then the script as written (2026-11-21, like the channel).
+DESCRIPTION_HEADER = "[{station} 뉴스]"
 
 # 전라남도 22개 시·군과 광주 (tags). A name counts only at the start of a word.
 REGIONS = (
@@ -84,9 +88,32 @@ def footer(script: ClipScript, template: str | None) -> str:
     return "\n".join(line for line in lines if line).strip()
 
 
+YOUTUBE_DESCRIPTION_MAX_BYTES = 5000
+HASHTAG_ROOM_BYTES = 300  # hashtags are added at upload (app/publish/service.with_hashtags)
+
+
+def _fit_bytes(text: str, limit: int) -> str:
+    """Cut at a line (or a sentence) so the text stays under `limit` UTF-8 bytes."""
+    if len(text.encode()) <= limit:
+        return text
+    cut = text.encode()[: max(0, limit - len("…".encode()))].decode(errors="ignore")
+    for sep in ("\n", ". ", " "):
+        i = cut.rfind(sep)
+        if i > len(cut) // 2:
+            cut = cut[: i + (1 if sep != "\n" else 0)]
+            break
+    return cut.rstrip() + "…"
+
+
 def description(script: ClipScript, footer_template: str | None) -> str:
-    parts = [" ".join(script.lead).strip(), footer(script, footer_template)]
-    return "\n\n".join(p for p in parts if p)
+    """"[목포MBC 뉴스]", then the newsroom script as written (2026-11-21, user's example). A footer
+    is added only when the program profile has one (description_footer)."""
+    head = _format(DESCRIPTION_HEADER, _values(script)).strip()
+    tail = footer(script, footer_template) if footer_template and footer_template.strip() else ""
+    body = script.script_text.strip() or " ".join(script.lead).strip()
+    room = YOUTUBE_DESCRIPTION_MAX_BYTES - HASHTAG_ROOM_BYTES - len(head.encode()) - len(tail.encode()) - 4
+    text = "\n".join(p for p in (head, _fit_bytes(body, room)) if p)
+    return f"{text}\n\n{tail}" if tail else text
 
 
 def regions(text: str) -> list[str]:

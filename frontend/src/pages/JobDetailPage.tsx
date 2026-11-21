@@ -334,7 +334,8 @@ function BulkBar({ clips }: { clips: Clip[] }) {
   const [first, setFirst] = useState("");
   const [interval, setInterval_] = useState(10);
   const [result, setResult] = useState<string | null>(null);
-  const ids = clips.filter((c) => ["DRAFT", "APPROVED", "RENDERING", "RENDERED"].includes(c.status)).map((c) => c.id);
+  const ids = clips.filter((c) => ["DRAFT", "APPROVED", "RENDERING", "RENDERED", "UPLOAD_FAILED"].includes(c.status)).map((c) => c.id);
+  const publishable = clips.filter((c) => ["RENDERED", "UPLOAD_FAILED"].includes(c.status)).map((c) => c.id);
   if (!clips.length) return null;
   const report = (rows: { ok: boolean; clip_id: number; problems: string[]; error: string | null }[]) => {
     const failed = rows.filter((r) => !r.ok);
@@ -369,6 +370,16 @@ function BulkBar({ clips }: { clips: Clip[] }) {
           {ids.length}건 예약
         </button>
       </span>
+      {publishable.length > 0 && (
+        <button
+          className="btn btn-small"
+          disabled={bulk.isPending}
+          title="각 클립에 고른 채널로 올립니다"
+          onClick={() => bulk.mutateAsync({ clip_ids: publishable, action: "publish" }).then(report, (e: Error) => setResult(e.message))}
+        >
+          렌더 완료 {publishable.length}건 업로드
+        </button>
+      )}
       {result && <div>{result}</div>}
     </div>
   );

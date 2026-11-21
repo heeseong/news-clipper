@@ -10,6 +10,7 @@ from sqlalchemy.orm import object_session
 
 from app.api.deps import DbSession
 from app.models import AlignedSentence, Clip, Job, RundownItem
+from app.publish.service import UPLOAD_STATES, current_tasks
 from app.review.service import EDITABLE, LOCK_SECONDS, approval_problems, lock_holder
 from app.schemas.newsroom import AlignedSentenceOut, ClipDetailOut, ClipMetadataOut, ClipOut, ThumbnailOut
 from app.storage import JobFiles
@@ -41,6 +42,9 @@ def clip_out(clip: Clip, model: type[ClipOut] = ClipOut) -> ClipOut:
     out.kind = clip_kind(clip)
     if clip.render_path and clip.rendered_at:
         out.render_url = f"/media/clips/{clip.id}/final.mp4?v={_version(clip.rendered_at)}"
+    session = object_session(clip)
+    if session is not None and clip.status in UPLOAD_STATES:
+        out.remote_urls = [t.remote_url for t in current_tasks(session, clip.id) if t.remote_url]
     holder = lock_holder(clip)
     out.locked_by_name = holder.name if holder else None
     return out
@@ -55,6 +59,9 @@ def clip_detail(clip: Clip) -> ClipDetailOut:
         for t in sorted(clip.thumbnails, key=lambda t: (t.source == "candidate", t.rank, t.id))
     ]
     session = object_session(clip)
+    from app.api.publish import task_out
+
+    out.publish_tasks = [task_out(t) for t in current_tasks(session, clip.id)]
     out.approval_problems = approval_problems(session, clip) if clip.status in EDITABLE else []
     if out.locked_by_name and clip.locked_at:
         locked_at = clip.locked_at if clip.locked_at.tzinfo else clip.locked_at.replace(tzinfo=UTC)

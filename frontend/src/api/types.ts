@@ -50,7 +50,7 @@ export interface Job {
   warnings: string[];
   is_dummy: boolean;
   cue_sheet_id: number | null;
-  clip_counts: { total: number; ranged: number; approved: number; rejected: number };
+  clip_counts: { total: number; ranged: number; approved: number; rejected: number; uploaded: number; upload_failed: number };
   created_at: string;
   updated_at: string;
 }
@@ -116,6 +116,7 @@ export interface Program {
   audio_track: number | null;
   excluded_sources: string[];
   dedupe_program: string | null;
+  default_channels: number[];
 }
 
 // --- newsroom (backend/app/schemas/newsroom.py) ---
@@ -223,6 +224,7 @@ export interface Clip {
   rendered_at: string | null;
   render_error: string | null;
   render_url: string | null;
+  remote_urls: string[];
 }
 
 export interface TextCandidate {
@@ -269,6 +271,7 @@ export interface ClipDetail extends Clip {
   thumbnails: ThumbnailCandidate[];
   approval_problems: string[];
   lock_expires_at: string | null;
+  publish_tasks: PublishTask[];
 }
 
 export interface AlignedSentence {
@@ -292,6 +295,7 @@ export interface ClipPatch {
   privacy?: string;
   publish_at?: string | null;
   clear_publish_at?: boolean;
+  channel_ids?: number[];
   warnings_acknowledged?: boolean;
 }
 
@@ -342,4 +346,77 @@ export interface Rundown {
   warnings: string[];
   items: RundownItem[];
   counts: RundownCounts;
+}
+
+// --- publishing (backend/app/schemas/publish.py, M7) ---
+
+export interface Channel {
+  id: number;
+  platform: "youtube" | "fake";
+  name: string;
+  remote_channel_id: string;
+  url: string | null;
+  avatar_url: string | null;
+  status: "active" | "reauth_required" | "disconnected";
+  last_error: string | null;
+  connected_at: string | null;
+}
+
+export interface ChannelList {
+  channels: Channel[];
+  modes: ("fake" | "web" | "device")[];
+}
+
+export interface ConnectState {
+  session_id: string | null;
+  kind: "fake" | "web" | "device";
+  status: "pending" | "connected" | "failed";
+  auth_url: string | null;
+  user_code: string | null;
+  verification_url: string | null;
+  interval: number;
+  expires_at: string | null;
+  error: string | null;
+  channel: Channel | null;
+}
+
+export type PublishStatus = "QUEUED" | "UPLOADING" | "UPLOADED" | "PROCESSING" | "SCHEDULED" | "PUBLISHED" | "FAILED" | "CANCELLED";
+
+export interface PublishTask {
+  id: number;
+  clip_id: number;
+  channel_id: number;
+  channel_name: string;
+  status: PublishStatus;
+  privacy: string;
+  publish_at: string | null;
+  remote_id: string | null;
+  remote_url: string | null;
+  attempts: number;
+  next_retry_at: string | null;
+  last_error: string | null;
+  error_kind: string | null;
+  file_size: number | null;
+  bytes_sent: number;
+  thumbnail_status: string | null;
+  thumbnail_error: string | null;
+  remote_status: Record<string, unknown>;
+  checked_at: string | null;
+  uploaded_at: string | null;
+  published_at: string | null;
+  next_check_at: string | null;
+  thumbnail_next_at: string | null;
+  sync_status: "pending" | "syncing" | "ok" | "failed" | null;
+  sync_error: string | null;
+  synced_at: string | null;
+  created_at: string;
+  updated_at: string;
+  job_id: number | null;
+  item_no: number | null;
+  title: string | null;
+}
+
+export interface PublishSummary {
+  channels: { channel: Channel; queued: number; uploading: number; scheduled_today: number; published_today: number; failed: number }[];
+  quota: { platform: string; day: string; used: number; limit: number; resets_at: string; uploads_left: number }[];
 }

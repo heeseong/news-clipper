@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Literal
@@ -26,12 +27,43 @@ class ClipScript:
     all_text: str = ""  # every sentence and the title (fact check reference)
     series: str | None = None
     extra: dict[str, str] = field(default_factory=dict)
+    # The script as written in the newsroom (MARS-L articleContent), for the YouTube description.
+    # Empty when the cue sheet response is not stored: the sentences are used instead.
+    script_text: str = ""
 
 
 def _body_line(kind: SentenceKind, text: str, speaker: str | None) -> str:
     if kind in (SentenceKind.INTERVIEW, SentenceKind.SYNC):
         return f"[인터뷰 {speaker}] {text}" if speaker else f"[인터뷰] {text}"
     return text
+
+
+# ◀ 앵 커 ▶, ◀ 리포트 ▶, ◀ SYNC ▶ 전경선 / … (not ◀ END ▶: the blank line after it separates sections)
+MARKER_RE = re.compile(r"^◀(?!\s*E\s*N\s*D\s*▶).*▶")
+
+
+def tidy_script(text: str) -> str:
+    """The newsroom script as written, with only the whitespace tidied: spaces at line ends and
+    starts, runs of blank lines, and blank lines right after a marker line such as ◀ 앵 커 ▶
+    (2026-11-21). The markers and the editor's line breaks stay."""
+    lines = [line.strip() for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
+    out: list[str] = []
+    for line in lines:
+        if line:
+            out.append(line)
+        elif out and out[-1] and not MARKER_RE.match(out[-1]):
+            out.append(line)
+    return "\n".join(out).strip()
+
+
+def raw_script(item) -> str:
+    """articleContent of the item in the stored cue sheet response (Rundown.raw)."""
+    raw = (item.rundown.raw or {}).get("items") or [] if item.rundown is not None else []
+    for r in raw:
+        same_id = item.newsroom_item_id is not None and r.get("cueSheetItemId") == item.newsroom_item_id
+        if same_id or (item.newsroom_item_id is None and str(r.get("cueSheetItemOrderNumber")) == str(item.item_no)):
+            return tidy_script((r.get("article") or {}).get("articleContent") or "")
+    return ""
 
 
 def clip_script(clip: Clip, job: Job, station: str) -> ClipScript:
@@ -59,4 +91,5 @@ def clip_script(clip: Clip, job: Job, station: str) -> ClipScript:
         station=station,
         all_text="\n".join([item.title, item.title_raw or "", *(s.text for s in sentences)]),
         series=item.series,
+        script_text=raw_script(item) or "\n\n".join(s.text for s in sentences),
     )

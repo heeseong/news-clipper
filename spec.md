@@ -1,12 +1,13 @@
 # News Clipper — 기능 명세 (spec.md)
 
-> 종합뉴스 방송 녹화본을 **큐시트·원고(MARS-L)**에 맞춰 리포트 단위로 자동 분할하고, 제목·설명·썸네일을 만든 뒤 검수를 거쳐 YouTube 등 채널에 예약 업로드하는 사내 웹 애플리케이션.
+> 종합뉴스 방송 녹화본을 **큐시트·원고(MARS-L)**에 맞춰 기사(리포트·단신) 단위로 자동 분할하고, 제목·설명·썸네일을 만든 뒤 검수를 거쳐 YouTube 등 채널에 예약 업로드하는 사내 웹 애플리케이션.
 
-- 문서 버전: v1.2 (2026-11-19)
+- 문서 버전: v1.3 (2026-11-21)
 - 변경 이력
   - v0.1: STT + LLM 기반 경계 탐지
   - v0.2: **큐시트·원고 + 원고-오디오 정렬 기반으로 전환** (STT는 보조 수단), 업로드 대상을 **리포트(R)로 한정**
   - v0.3: MARS-L 외부 API 명세 반영(3.1~3.2, 5.4). 형식(R/S)·예정 길이가 API에 없어 대안 규칙 추가
+  - v1.3: YouTube 업로드 구현·실제 채널 확인 반영(M7): 업로드 흐름과 상태, 채널 연동(기기 코드 방식), 할당량과 채널 업로드 개수 한도, 유튜브 설명 형식(원고 그대로 + 해시태그) (5.7, 5.9, 5.10, 7, 8, 13~16)
   - v1.2: 프록시 해상도 360p, 타임라인 스프라이트는 원본 프레임에서 생성 (5.2)
   - v1.1: MARS-L 큐시트 목록(001)·조회(002)·상세(003) API 실제 응답 반영 (3.1, 3.2, 5.4): 경로·인증 헤더 확정, `programType` 필드, 큐시트 매칭 규칙 (3.1, 5.4)
   - v1.0: 4차 블라인드 검증(11-05) 반영: 앵커 컷과 리드 사이에 말소리가 있으면 인사말로 보고 제외 (5-3)
@@ -336,7 +337,7 @@ class NewsroomProvider(Protocol):
 | 항목 | 기본값 (원고·큐시트) | LLM 보완 |
 |---|---|---|
 | 제목 | 원고 헤더의 전체 제목(접두어 정리) + `[목포MBC 뉴스데스크]` (프로그램 프로필 `title_template`) | 대안 제목 2개 (YouTube 100자 제한, 권장 40~60자, 과장·낚시성 표현 금지) |
-| 설명 | 앵커 리드 + 템플릿 꼬리말(기자명, 방송일, 프로그램, 채널 정보) | 리포트 본문 2~3문장 요약 |
+| 설명 | `[목포MBC 뉴스]` 한 줄 + 큐시트 원고(`articleContent`) 그대로. ◀ 앵 커 ▶·◀ END ▶ 같은 표시와 편집기 줄바꿈을 살리고, 줄 앞뒤 공백·연속 빈 줄·표시 바로 다음 빈 줄만 정리(◀ END ▶ 뒤 빈 줄은 유지). 꼬리말은 프로그램 프로필 `description_footer`가 있을 때만. 업로드 때 끝에 해시태그. 5,000바이트를 넘으면 원고를 줄 단위로 자름 (2026-11-21) | 리포트 본문 2~3문장 요약(후보, 검수자가 넣을 수 있음) |
 | 태그 | 프로그램 기본 태그 + 기자명 + 지역명 | 원고 기반 키워드 10개 이내, 해시태그 3개 이내 |
 | 썸네일 문구 | 원고 메모의 `썸네일` 항목 (실제 API의 `memo`는 항상 비어 있음, 3.1) | 없을 때만 `상단` 자막이나 제목에서 15자 이내 문구 생성 → 사실상 항상 생성 |
 
@@ -371,40 +372,54 @@ class NewsroomProvider(Protocol):
 **승인 조건**: 제목 있음, 길이 제한 이내, 썸네일 선택됨, 경고 플래그 확인됨. 승인하면 최종 렌더(6-b)가 자동으로 시작된다.
 
 ### 5.9 [9] 채널 업로드 및 예약 발행
-**Publisher 어댑터**
+**Publisher 어댑터** (`backend/app/publish/base.py`, 채널마다 하나)
 ```python
 class Publisher(Protocol):
-    def upload(self, clip: RenderedClip, meta: PublishMeta) -> PublishResult: ...
+    def upload(self, video: Path, meta: PublishMeta, *, resume_uri=None, on_session=None, on_progress=None) -> PublishResult: ...
     def set_thumbnail(self, remote_id: str, image: Path) -> None: ...
     def get_status(self, remote_id: str) -> RemoteStatus: ...
     def update(self, remote_id: str, meta: PublishMeta) -> None: ...
     def delete(self, remote_id: str) -> None: ...
 ```
+- 오류는 `PublishError(kind)`: `network`, `server`(재시도), `auth`(채널 재연결), `quota`(다음 할당량 날), `invalid`(수정 후 수동 재시도), `remote`(플랫폼 처리 실패·거부)
+- 개발·테스트용 가짜 플랫폼(`PUBLISHER=fake`)이 있다(상태를 파일로 두고, 예약 시각이 지나면 공개로 보인다)
+
+**업로드 흐름** (2026-11-21 구현)
+- 승인 → 렌더(`RENDERED`) → 클립의 채널마다 `PublishTask` → publish 워커가 업로드. 채널은 메타데이터를 만들 때 프로그램 프로필 `default_channels`로 채우고 검수 화면에서 바꾼다. 채널을 고르지 않았으면 렌더까지만 하고 "업로드" 버튼으로 올린다
+- 클립 상태는 작업 중 가장 덜 진행된 것을 따른다(실패가 하나라도 있으면 `UPLOAD_FAILED`)
+- 발행 설정(채널·공개 범위·예약)은 업로드가 시작되기 전까지만 바꿀 수 있다. 올라간 뒤 바꾸려면 업로드를 취소(영상 삭제)한다 — 원격 수정은 5.10(M8)
+- 예약 시각이 업로드 시작 2분 안이거나 지났으면 올리지 않고 실패로 둔다(시각을 바꾸고 다시 시도)
 
 **YouTube (v1)**
-- YouTube Data API v3 `videos.insert` **resumable upload** (청크 8MB 배수, 중단 지점에서 재개)
+- YouTube Data API v3 `videos.insert` **resumable upload** (청크 8MB 배수, 세션 URI를 저장해 중단 지점에서 재개). HTTP는 httpx로 직접 호출
 - 예약 발행: `privacyStatus = "private"` + `publishAt`(UTC로 변환)
-- `thumbnails.set` (채널 인증 필요), `categoryId = 25`(News & Politics), `defaultLanguage = ko`
+- `thumbnails.set`, `categoryId = 25`(News & Politics), `defaultLanguage = defaultAudioLanguage = ko`, `selfDeclaredMadeForKids = false`. 제목·설명의 `<` `>`는 전각으로 바꾼다
 - (P2) `captions.insert`: 정렬된 원고로 만든 SRT를 자막 트랙으로 업로드. STT 자막보다 정확함
-- 채널 연동: 관리자가 OAuth 2.0으로 연결, refresh token은 암호화해 저장
-- **할당량**: 기본 하루 10,000 units, `videos.insert` 1회 1,600 units → **하루 약 6건**. 리포트 5건/회 × 하루 방송 수를 기준으로 증설을 신청해야 한다. 일일 사용량을 추적하고 한도에 가까워지면 다음 날로 넘기고 경고한다.
+- 채널 연동: 관리자가 OAuth 2.0으로 연결(범위 `youtube`), refresh token은 `TOKEN_ENCRYPTION_KEY`(Fernet)로 암호화해 저장. 사내 http 서버에서도 되도록 **기기 코드 방식**(OAuth 클라이언트 유형 "TV 및 입력 제한 기기", google.com/device에 코드 입력)을 기본으로 하고, https 주소가 있으면 브라우저 리디렉트(`/api/channels/oauth/callback`)도 쓸 수 있다
+- **할당량**: 기본 하루 10,000 units(Google Cloud 프로젝트 단위, 태평양 시간 자정 초기화). 문서상 `videos.insert` 1,600 + `thumbnails.set` 50 units → 하루 약 6건. 업로드 전에 units를 예약하고, 모자라거나 `403 quotaExceeded`면 초기화 뒤로 미룬다. **실측(2026-11-21)**: 하루 10건이 업로드됐다 → 실제 insert 비용은 1,600보다 작다(콘솔에서 확인 후 `YOUTUBE_QUOTA_INSERT` 조정)
+- **채널 업로드 개수 한도**: 같은 날 11번째 업로드에서 `400 uploadLimitExceeded`(테스트 채널). 프로젝트 할당량과 별개인 채널 한도라 그 채널의 업로드만 다음 날로 미룬다. 운영 채널의 한도를 확인해야 한다(16-7)
 
 **기타 SNS (v2)**: Meta(Facebook/Instagram Reels), TikTok, 카카오(대상 확정 후). 예약 기능이 없는 플랫폼은 자체 스케줄러로 예약 시각에 업로드한다.
 
 ### 5.10 [10] 업로드 상태 확인 및 재시도
-- 업로드 뒤 상태 폴링(`videos.list?part=status,processingDetails`, 1분 → 최대 10분 간격으로 점진 증가)
+> M7(재시도·미루기, 수동 재시도·취소, 대시보드)과 M8(점진적 상태 확인, 썸네일 자동 재시도, 업로드 뒤 수정 자동 반영, 장애 시나리오 테스트)에서 구현했다.
+
+- 업로드 뒤 상태 확인(`videos.list?part=status,processingDetails`): 1분 sweep이 작업별 다음 확인 시각을 본다. 처리 중에는 1·2·4·8분 뒤, 그다음 10분마다. 처리된 예약 영상은 예약 시각 1분 뒤. 게시 뒤에도 10분·1시간·6시간·24시간에 다시 확인해 거부·삭제를 잡는다
+- 상태 대응: `processed` + 목표 공개 범위 → `PUBLISHED`, `publishAt`이 남아 있으면 `SCHEDULED`, `uploaded`(처리 중) → `PROCESSING`, `failed`/`rejected`/영상 없음 → `UPLOAD_FAILED`(사유 표시). 예약 시각이 15분 지나도 비공개면 실패로 알린다(미인증 API 프로젝트는 비공개로 고정될 수 있음)
 - 재시도 정책
   | 오류 | 처리 |
   |---|---|
-  | 네트워크 오류, 5xx | resumable 세션으로 이어서 업로드, 지수 백오프(1, 2, 4, 8, 16분), 최대 5회 |
-  | 401 | 토큰 갱신 후 재시도. 실패하면 관리자에게 재연동 알림 |
-  | 403 quotaExceeded | 할당량 초기화 시각(태평양 시간 자정) 이후로 재예약 |
-  | 400 메타데이터 오류 | 재시도 안 함 → UPLOAD_FAILED, 수정 후 수동 재시도 |
-  | 플랫폼 처리 실패·거부 | UPLOAD_FAILED + 사유 표시 |
-  | 썸네일만 실패 | 영상은 유지하고 썸네일만 재시도 |
-- 수동 조작: 재시도, 취소(예약 영상 삭제), 메타데이터 수정 후 원격 반영(`videos.update`)
-- 알림: 웹 알림, 선택적으로 Slack/메일 Webhook
-- 업로드 대시보드: 채널별 오늘 예약·공개·실패 건수, 할당량 사용률
+  | 네트워크 오류, 5xx, 429, rateLimitExceeded | resumable 세션으로 이어서 업로드, 지수 백오프(1, 2, 4, 8, 16분), 최대 5회 |
+  | 401 | 토큰 갱신 후 한 번 더. 실패하면 채널을 "다시 연결 필요"로 표시(→ M8: 관리자 알림) |
+  | 403 quotaExceeded | 할당량 초기화 시각(태평양 시간 자정) + 5분 뒤로 재예약 |
+  | 400 uploadLimitExceeded | 채널 하루 업로드 개수 한도: 그 업로드만 초기화 뒤로 재예약(프로젝트 할당량은 그대로) |
+  | 400 메타데이터 오류, 403 forbidden | 재시도 안 함 → UPLOAD_FAILED, 수정 후 수동 재시도 |
+  | 플랫폼 처리 실패·거부 | UPLOAD_FAILED + 사유 표시. 다시 시도하면 새 영상으로 올림 |
+  | 썸네일만 실패 | 영상은 유지하고 썸네일만 재시도(일시 오류는 2·10·30분 뒤 자동, 그 밖에는 수동 버튼) |
+- 수동 조작: 재시도(횟수 처음부터), 취소(올라간 영상은 삭제), 상태 확인
+- **업로드 뒤 메타데이터를 고치면 YouTube에 자동 반영**(2026-11-21 결정): 제목·설명·태그·해시태그·공개 범위·예약·썸네일. `videos.update`는 영상을 먼저 읽고 바꾸는 항목만 합쳐 보낸다(보낸 part의 나머지 속성이 초기화되므로). 채널·구간은 업로드를 취소해야 바꾸고, 게시된 영상의 예약 시각은 바꿀 수 없다. 반영 실패는 표시하고 일시 오류는 자동, 그 밖에는 "다시 반영"
+- 알림: **외부 알림(Slack·메일)은 쓰지 않는다**(2026-11-21 결정). 문제는 게시 현황·편집기 화면의 상태와 사유로 보여 준다
+- 업로드 대시보드(`/publish`): 채널별 오늘 예약·게시·대기·실패 건수, 할당량 사용량과 초기화 시각
 
 ---
 
@@ -463,16 +478,18 @@ storage/jobs/{job_id}/
 |---|---|
 | User | id, email, name, role, password_hash |
 | ProgramProfile | id, name, newsroom_program_id, audio_track, signoff_pattern, title_cleanup_rules, description_footer, default_tags, thumbnail_template(JSON), default_channels |
-| Channel | id, platform, name, remote_channel_id, oauth_token(encrypted), quota_used_today |
+| Channel | id, platform(youtube/fake), name, remote_channel_id, url, status(active/reauth_required/disconnected), refresh_token·access_token(encrypted), access_token_expires_at, last_error |
+| OAuthSession | id(=state), kind(web/device), status, device_code(encrypted), user_code, verification_url, expires_at, channel_id |
+| QuotaUsage | platform, day(태평양 시간 기준), units — 할당량은 프로젝트 단위라 채널별이 아니라 플랫폼별로 센다 |
 | Job | id, program_id, broadcast_date, status, current_step, error, source_path, source_hash, duration, fps, width, height, created_by |
 | JobStep | id, job_id, step, status, started_at, finished_at, attempts, error |
 | Rundown | id, job_id, newsroom_rundown_id, edition(판 수), confirmed_at, fetched_at, raw(JSONB) |
 | RundownItem | id, rundown_id, item_no, type(R/S/null), source(타 방송사명 또는 null), source_reason, upload(bool), title, reporter, planned_duration, cumulative, video_channel(V), audio_source(A), note, parsed_script(JSONB), parse_warnings[] |
 | AlignedSentence | id, rundown_item_id, seq, section(lead/report), kind, text, start_sec, end_sec, score |
 | Clip | id, job_id, rundown_item_id, start_sec, end_sec, start_snap, end_snap, confidence, flags[], status, render_path, locked_by, locked_at |
-| ClipMetadata | clip_id, title, title_candidates[], description, tags[], hashtags[], thumbnail_text, privacy, publish_at |
+| ClipMetadata | clip_id, title, title_candidates[], description, tags[], hashtags[], thumbnail_text, privacy, publish_at, channel_ids[] |
 | Thumbnail | id, clip_id, frame_sec, path, score, overlay_text, selected |
-| PublishTask | id, clip_id, channel_id, status, remote_id, remote_url, attempts, next_retry_at, last_error, resumable_uri, published_at |
+| PublishTask | id, clip_id, channel_id, status(QUEUED/UPLOADING/UPLOADED/PROCESSING/SCHEDULED/PUBLISHED/FAILED/CANCELLED), privacy, publish_at(반영된 값), remote_id, remote_url, attempts, next_retry_at, last_error, error_kind, resumable_uri, file_size, bytes_sent, thumbnail_status·attempts·next_at, remote_status, checked_at, next_check_at, check_count, sync_status·version·error·next_at(업로드 뒤 수정 반영), uploaded_at, published_at |
 | AuditLog | id, user_id, entity, entity_id, action, diff(JSONB), created_at |
 
 - 시간은 원본 기준 초(소수점 3자리)로 저장하고, 화면에는 타임코드(HH:MM:SS:FF)로 표시한다.
@@ -497,10 +514,15 @@ storage/jobs/{job_id}/
 | POST | `/api/clips/{id}/metadata/regenerate` | LLM 보완 재생성 |
 | GET/POST | `/api/clips/{id}/thumbnails` | 후보 조회 / 현재 프레임·업로드로 추가 |
 | POST | `/api/clips/{id}/approve`, `/reject` | 승인/반려 |
-| POST | `/api/clips/bulk` | 일괄 승인/예약 |
-| GET | `/api/publish-tasks` | 업로드 현황 |
-| POST | `/api/publish-tasks/{id}/retry`, `/cancel` | 재시도/취소 |
-| GET/POST | `/api/channels`, `/api/channels/oauth/callback` | 채널 연동 |
+| POST | `/api/clips/bulk` | 일괄 승인/예약/업로드 (`action`: approve, schedule, publish) |
+| POST | `/api/clips/{id}/publish` | 렌더된 클립을 고른 채널로 업로드 |
+| GET | `/api/publish-tasks` | 업로드 현황 (`status`, `channel_id`, `clip_id` 필터) |
+| GET | `/api/publish/summary` | 채널별 오늘 건수, 할당량 |
+| POST | `/api/publish-tasks/{id}/retry`, `/cancel`, `/check` | 재시도/취소(영상 삭제)/상태 확인 |
+| GET | `/api/channels` | 채널 목록과 쓸 수 있는 연결 방식 |
+| POST | `/api/channels/connect`, `/api/channels/connect/{id}/poll` | 채널 연결 시작(device/web/fake), 기기 코드 방식 결과 확인 |
+| GET | `/api/channels/oauth/callback` | 브라우저 리디렉트 방식 콜백 |
+| DELETE | `/api/channels/{id}` | 연결 해제(토큰 삭제·취소) |
 | CRUD | `/api/programs` | 프로그램 프로필 |
 | GET | `/media/...` | 프록시·썸네일 스트리밍 (HTTP Range, 인증 필요) |
 
@@ -554,7 +576,7 @@ storage/jobs/{job_id}/
 |---|---|
 | 큐시트 | 방송 아이템의 순서·형식·예정 길이·기자를 정리한 진행표 (MARS-L) |
 | 리포트 (R) | 앵커 리드 + 기자 리포트(내레이션, 인터뷰, 스탠드업) + 사인오프로 구성된 보도 한 꼭지. **업로드 대상** |
-| 단신 (S) | 앵커가 화면과 함께 읽는 짧은 뉴스. 업로드 대상 아님 |
+| 단신 (S) | 앵커가 화면과 함께 읽는 짧은 뉴스(스트레이트). 자사 단신은 **업로드 대상**(2026-11-20) |
 | 앵커 리드 | 리포트 앞에서 앵커가 내용을 소개하는 멘트 (`◀앵커▶` 구간) |
 | 사인오프 | 리포트 끝의 "mbc뉴스 ○○○입니다" |
 | 강제 정렬 | 이미 아는 텍스트가 오디오의 몇 초에 있는지 찾는 기술 (받아쓰기와 다름) |
@@ -566,7 +588,7 @@ storage/jobs/{job_id}/
 - 녹화본은 방송 완제품(자막·그래픽 포함)이며, 잘라서 바로 게시할 수 있다.
 - 녹화본 1개에는 프로그램 1회분이 들어 있다. 앞뒤 여유 구간(이전 프로그램, 광고)이 있을 수 있다.
 - 원고의 발화 내용은 실제 방송과 대부분 일치한다(애드리브나 사소한 수정은 허용).
-- 업로드 대상 YouTube 채널은 인증된 채널이다(커스텀 썸네일 가능).
+- 업로드 대상 YouTube 채널은 인증된 채널이다(커스텀 썸네일 가능). 테스트 채널에서는 맞춤 썸네일이 반영됐다(2026-11-21).
 - 저작권·초상권(음성변조, 모자이크 등) 문제는 방송 단계에서 처리됐다고 보고, 최종 판단은 검수자가 한다.
 
 ## 15. 결정 사항 기록
@@ -584,6 +606,12 @@ storage/jobs/{job_id}/
 | 2026-11-21 | 유튜브 제목은 `원고 제목[목포MBC 뉴스데스크]` 형태(채널 관행, 프로그램 프로필 `title_template`). LLM 대안 제목은 후보로만 |
 | 2026-11-20 | 썸네일: 리포트는 대표 프레임 + 템플릿 이미지 + 제목 두 줄, 단신은 앵커 샷 뒤 자료화면에 하단 제목 자막이 처음 뜬 화면(글자를 그리지 않음) |
 | 2026-11-19 | 프록시는 360p(검수 재생용). 스프라이트·썸네일·최종 렌더는 원본에서 만든다 |
+| 2026-11-21 | 승인한 클립은 렌더가 끝나면 고른 채널로 자동 업로드(승인이 사람의 확인). 채널이 없으면 렌더까지만 |
+| 2026-11-21 | 발행 설정(채널·공개 범위·예약)은 업로드 시작 전까지만 변경. 올라간 뒤에는 업로드 취소(영상 삭제) 후 변경(원격 수정은 M8) |
+| 2026-11-21 | 채널 연동은 기기 코드 방식(OAuth 클라이언트 "TV 및 입력 제한 기기")을 기본으로. 토큰은 암호화 저장 |
+| 2026-11-21 | 업로드 뒤 메타데이터를 고치면 YouTube에 자동 반영한다(버튼 없이) |
+| 2026-11-21 | 업로드 관련 외부 알림(Slack·메일)은 받지 않는다. 화면의 상태·사유 표시로 충분 |
+| 2026-11-21 | 유튜브 설명은 `[목포MBC 뉴스]` + 큐시트 원고 그대로(표시·줄바꿈 유지, 표시 바로 다음 빈 줄은 제거), 끝에 해시태그. 꼬리말은 프로필에 있을 때만 (이전: 앵커 리드 + 꼬리말) |
 
 ## 16. 미결 사항 (확인 필요)
 1. **MARS-L 실제 응답 확인** (명세서는 받음, 3.1 참고)
@@ -596,6 +624,8 @@ storage/jobs/{job_id}/
    - ~~002 실제 응답~~ → 확인됨(2026-11-20): 001 원소와 필드가 같다. 001에는 `updateDatetime`이 없고 `inputDateTime`만 있다
 2. ~~녹화본 샘플~~ → 뉴스데스크 녹화본 6편으로 정렬 검증(11-02, 11-04, 11-05, 11-11 PoC, 11-16, 11-19 서비스 코드)
 3. ~~녹화본 범위~~ → 확인됨: 앞에 다른 뉴스가 약 100~125초 붙고, 프로그램이 끝나기 전에 녹화가 끝나는 경우가 있다(11-11, 11-16, 11-19). 끝에 관계없는 오디오가 붙기도 한다
-4. **대상 프로그램**: 뉴스데스크와 뉴스투데이(뉴스투데이는 전날 뉴스데스크 방송분 제외, 2026-11-20). 하루 업로드 편수 → YouTube 할당량 증설 규모 결정은 남음
+4. **대상 프로그램**: 뉴스데스크와 뉴스투데이(뉴스투데이는 전날 뉴스데스크 방송분 제외, 2026-11-20). 하루 업로드 편수 → YouTube 할당량 증설 규모 결정은 남음. 11-16 뉴스데스크 한 편의 업로드 대상은 25건(리포트 5 + 단신 20)이었다
 5. ~~**제목 정책**~~ → 결정(2026-11-21): 원고 제목 + `[목포MBC 뉴스데스크]`. LLM 대안은 후보
 6. **카카오/기타 SNS**: 구체적인 대상 서비스와 공개 API 제공 여부
+7. **YouTube 운영 한도** (2026-11-21 실측, 사용자가 나중에 확인 예정): 테스트 채널은 하루 10건 업로드 뒤 `uploadLimitExceeded`. 운영 채널의 하루 업로드 개수 한도, `videos.insert`의 실제 units 비용(Cloud 콘솔), API 감사·할당량 증설 신청(같은 양식) 진행 여부. 뉴스데스크 + 뉴스투데이 전체를 한 채널에 올리면 한도를 넘을 수 있다 → 채널 분리나 업로드 대상 조정 필요 여부
+8. ~~**알림 경로**~~ → 결정(2026-11-21): 외부 알림 없음

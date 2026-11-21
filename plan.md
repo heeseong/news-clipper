@@ -1,6 +1,6 @@
 # News Clipper — 구현 계획 (plan.md)
 
-> spec.md v1.0 기준 (큐시트·원고 + 강제 정렬, 자사 리포트·스트레이트 업로드 — 2026-11-20 스트레이트 추가). 각 마일스톤은 독립적으로 실행·검증할 수 있는 단위이며, 완료 조건(DoD)을 만족하면 다음으로 넘어간다.
+> spec.md v1.3 기준 (큐시트·원고 + 강제 정렬, 자사 리포트·스트레이트 업로드 — 2026-11-20 스트레이트 추가, YouTube 업로드 2026-11-21). 각 마일스톤은 독립적으로 실행·검증할 수 있는 단위이며, 완료 조건(DoD)을 만족하면 다음으로 넘어간다.
 
 ## 진행 원칙
 - 각 단계는 "핵심 로직 → 단위 테스트 → API → (필요 시) UI" 순서로 만든다.
@@ -21,7 +21,8 @@ news-clipper/
       pipeline/       # ingest, proxy, signals, newsroom, align, clip, metadata, thumbnail, render, publish
       newsroom/       # NewsroomProvider(MARS-L, Fake), 원고 파서
       align/          # 문장 분할, 강제 정렬, 대략 위치 추정, 경계 보정
-      providers/      # llm/, publishers/, stt/(P2)
+      metadata/, thumbnails/, review/, render/  # 메타·썸네일(M4), 검수(M5), 렌더(M6)
+      publish/        # Publisher(YouTube, Fake), OAuth, 할당량, 업로드 흐름(M7)
       media/          # ffmpeg/ffprobe 래퍼, 장면·무음 분석
       worker.py
     alembic/
@@ -263,7 +264,7 @@ news-clipper/
 
 ---
 
-## M5. 검수 화면 (파이프라인 8) — 구현 (2026-11-21). 채널 선택은 M7(채널 연동) 뒤
+## M5. 검수 화면 (파이프라인 8) — 완료 (2026-11-21). 채널 선택은 M7에서 추가
 > **상태 (2026-11-21)**: 5.1~5.8 구현. 11-16 녹화본·실제 큐시트·실제 정렬로 띄운 스택에서 편집 화면·타임라인·키보드 조작·잠금을 브라우저(Playwright)로 확인했고, E2E(업로드 → 구간 지정 → 메타 수정 → 승인, Fake)가 통과한다. "리포트 1건 1분 안에"는 사람이 써 보며 확인할 것.
 
 | # | Task | 상태 |
@@ -273,7 +274,7 @@ news-clipper/
 | 5.3 | 원고 패널: 정렬 문장 하이라이트, 클릭 이동, 신뢰도 표시 | 완료 (점수 -5 미만 문장 표시) |
 | 5.4 | 메타데이터 폼(제목 후보, 글자 수), 썸네일 선택/현재 프레임/업로드, 오버레이 미리보기 | 완료 |
 | 5.5 | 미검출 리포트 수동 구간 지정 → 클립 생성 | 완료 (클립은 업로드 대상마다 이미 있으므로 `PATCH /api/clips/{id}`로 구간 지정 → 메타·썸네일 생성) |
-| 5.6 | 발행 설정(채널, 공개 범위, 예약 KST), 일괄 승인·순차 예약 | 공개 범위·예약·일괄 처리 완료. 채널 선택은 채널 연동(M7) 뒤 (`ClipMetadata.channel_ids`만 있음) |
+| 5.6 | 발행 설정(채널, 공개 범위, 예약 KST), 일괄 승인·순차 예약 | 완료 (채널 선택은 M7에서 추가) |
 | 5.7 | 승인 검증, 편집 잠금, 감사 로그 | 완료 (`app/review/service.py`, `AuditLog`) |
 | 5.8 | Playwright E2E: 업로드 → 검수 → 승인 (Fake provider) | 완료 (`frontend/e2e/`, `npm run e2e`, CI `e2e` 작업) |
 
@@ -346,18 +347,58 @@ news-clipper/
 
 ---
 
-## M7. YouTube 업로드·예약 발행 (파이프라인 9)
-| # | Task |
-|---|---|
-| 7.1 | `Publisher` 인터페이스 + `FakePublisher` |
-| 7.2 | Google OAuth 2.0 채널 연동, 토큰 암호화 저장, 갱신 |
-| 7.3 | YouTube 어댑터: resumable upload(재개 URI 저장), publishAt 예약, 썸네일, 카테고리·언어 |
-| 7.4 | 할당량 추적, 한도 도달 시 다음 날로 대기 |
-| 7.5 | PublishTask 생성(승인 + 렌더 완료 → 업로드 큐), 업로드 대시보드 |
+## M7. YouTube 업로드·예약 발행 (파이프라인 9) — 완료 (2026-11-21, 테스트 채널에서 예약 공개 확인)
+> **상태 (2026-11-21)**: 7.1~7.5 구현. 가짜 플랫폼(`PUBLISHER=fake`)으로 승인 → 렌더 → 업로드 → 예약 → 게시까지 테스트·E2E가 통과하고, YouTube 어댑터는 모의 API(httpx MockTransport)로 resumable 업로드·재개·토큰 갱신·오류 분류를 검증했다. 실제 테스트 채널에서 예약 업로드 → 썸네일·메타데이터 반영 → 예약 시각에 공개까지 확인했다(아래 "실제 채널 확인").
+
+| # | Task | 상태 |
+|---|---|---|
+| 7.1 | `Publisher` 인터페이스 + `FakePublisher` | 완료 (`app/publish/base.py`, `fake.py`: 상태를 `storage/fake_publisher/*.json`에 둬 API·워커가 같이 본다. 예약 시각이 지나면 공개로 보인다. 실패 주입 가능) |
+| 7.2 | Google OAuth 2.0 채널 연동, 토큰 암호화 저장, 갱신 | 완료 (`oauth.py`, `channels.py`, `crypto.py`. 기기 코드 방식 + 브라우저 리디렉트 방식, Fernet 암호화, 만료 60초 전 갱신, `invalid_grant` → 채널 "다시 연결 필요") |
+| 7.3 | YouTube 어댑터: resumable upload(재개 URI 저장), publishAt 예약, 썸네일, 카테고리·언어 | 완료 (`youtube.py`, httpx 직접 호출 — Google 클라이언트 라이브러리는 쓰지 않음) |
+| 7.4 | 할당량 추적, 한도 도달 시 다음 날로 대기 | 완료 (`quota.py`: 프로젝트 전체 일일 사용량(`quota_usage`), 업로드 전에 1,650 units 예약, 모자라거나 403 quotaExceeded면 태평양 시간 자정 + 5분으로 미룸) |
+| 7.5 | PublishTask 생성(승인 + 렌더 완료 → 업로드 큐), 업로드 대시보드 | 완료 (렌더 끝 → 클립 채널마다 `PublishTask` → publish 큐. 화면 `/publish`(게시 현황), `/channels`(채널 연결·프로그램 기본 채널), 편집기 업로드 칸) |
 
 **DoD**: 테스트 채널에 비공개 예약 업로드가 성공하고, 예약 시각에 공개되며 썸네일과 메타데이터가 반영된다.
 
-### M7 시작 가이드 (새 세션용, 2026-11-21 작성)
+### M7에서 정한 것
+- **흐름**: 승인 → 렌더(`RENDERED`) → 클립의 `channel_ids`마다 `PublishTask`(QUEUED) → publish 워커 업로드(UPLOADING) → UPLOADED → 예약이면 SCHEDULED, 아니면 PROCESSING → PUBLISHED. 실패는 FAILED, 사용자 취소는 CANCELLED(기록으로 남김). **클립 상태는 작업 중 가장 덜 진행된 것**(실패가 하나라도 있으면 `UPLOAD_FAILED`)
+- **업로드 시점**: 렌더가 끝나면 자동(`PUBLISH_AUTO=true`, 승인이 사람의 확인). 채널을 고르지 않았으면 렌더까지만 하고 편집기의 "업로드" 버튼이나 작업 상세의 "렌더 완료 N건 업로드"로 올린다
+- **채널 선택**: 메타데이터를 처음 만들 때 프로그램 프로필 `default_channels`로 채운다(채널 화면의 "프로그램 기본 채널"). 편집기 "업로드 채널"에서 클립마다 바꾼다. 연결된(active) 채널만 고를 수 있다
+- **발행 설정 잠금**: 채널·공개 범위·예약은 업로드가 시작되기 전(승인·렌더 중·렌더 완료·업로드 실패)까지만 바꿀 수 있다. 올라간 뒤 바꾸려면 업로드를 취소(영상 삭제)한다. 원격 메타 수정(`videos.update`)은 M8. "다시 열기"는 플랫폼에 영상이 없을 때만 되고 대기 중인 작업을 취소한다
+- **예약**: `privacyStatus=private` + `publishAt`(UTC). 업로드 시작 때 예약 시각이 2분 안이거나 지났으면 올리지 않고 실패(invalid)로 둔다 → 시각을 바꾸고 다시 시도. 예약 시각이 15분 지나도 비공개면 실패로 알린다(미인증 API 프로젝트는 비공개로 고정됨, 아래)
+- **재시도(M7 범위)**: 네트워크·5xx·429·rateLimit → 1, 2, 4, 8, 16분 뒤(최대 `PUBLISH_MAX_ATTEMPTS`=5), 같은 resumable 세션으로 이어 올린다(청크 실패는 프로세스 안에서 3번 먼저 이어 본다). 401 → 토큰 갱신 후 한 번 더, 그래도 실패면 채널 "다시 연결 필요". 400·403(forbidden 등) → 재시도 없이 실패. 할당량 → 다음 날. 썸네일만 실패하면 영상은 두고 썸네일만 다시(버튼). 수동 "다시 시도"는 횟수를 처음부터 센다
+- **Celery beat**(1분, `publish.sweep`): 재시도 시각이 된 작업 시작, 10분 넘게 진척 없는 업로드 재시작, 상태 확인(처리 중 2분마다, 예약 시각 직후와 그 뒤 5분마다, 처리 전인 예약 영상 10분마다). Compose에 `beat` 서비스 추가. 점진적 폴링·알림은 M8
+- **설명**: 검수한 설명 끝에 해시태그를 붙여 올린다(이미 있으면 그대로). 제목·설명의 `<` `>`는 전각으로 바꾼다(YouTube 거부 문자). 태그는 YouTube 500자 계산(쉼표, 공백 있는 태그는 따옴표)으로 자른다. `categoryId=25`, `defaultLanguage=defaultAudioLanguage=ko`, `selfDeclaredMadeForKids=false`
+- **할당량은 Google Cloud 프로젝트 단위**라 채널마다가 아니라 플랫폼 전체로 센다(spec 7의 `Channel.quota_used_today` 대신 `quota_usage` 표). 비용은 설정값(`YOUTUBE_QUOTA_INSERT`=1600, `_THUMBNAIL`=50)
+- **OAuth**: 범위는 `https://www.googleapis.com/auth/youtube` 하나(업로드·썸네일·상태·삭제). 클라이언트 시크릿은 토큰 엔드포인트에 HTTP Basic으로 보낸다 → 프록시가 넣어 줄 수도 있다(`GOOGLE_CLIENT_SECRET=proxy-injected`). 리디렉트 방식은 https(또는 localhost) 주소가 필요해서, 사내 http 서버에서는 **기기 코드 방식**(클라이언트 유형 "TV 및 입력 제한 기기")을 쓴다. 토큰은 `TOKEN_ENCRYPTION_KEY`(Fernet) 없이는 저장하지 않는다
+- **권한**: 로그인(M0.7)이 없어 지금은 검수자 이름만 있으면 누구나 채널을 연결·해제한다(spec은 관리자). 업로드 취소(영상 삭제)는 확인 창을 거친다
+- **SQLite에서 예약 시각이 9시간 어긋나던 문제(M5부터)**: `+09:00` 시각을 그대로 저장해 SQLite가 시간대를 버렸다 → 저장 전에 UTC로 바꾼다(PostgreSQL은 원래 맞았다)
+
+### 실제 채널 확인 (2026-11-21, 테스트 채널 `UCOj1kGSkQmNtX_zhMJgmu3A`)
+- 기기 코드 방식으로 채널 연결 성공. 처음 받은 클라이언트는 "TV 및 입력 제한 기기" 유형이 아니어서 `Invalid client type` → 새로 만든 TV 유형 클라이언트로 연결
+- 합성 녹화본(1280×720, 20초) 클립 8초: 업로드(resumable) → `privacyStatus=private` + `publishAt` 예약 → 맞춤 썸네일 반영(maxres) → 제목·설명(해시태그 포함)·태그·`categoryId=25`·`defaultLanguage=ko` 반영을 `videos.list`로 확인
+- 예약 시각(04:54 UTC) 뒤 첫 상태 확인(04:55)에서 `processed` + `public` → 작업·클립 `PUBLISHED`. **DoD 충족**. 이 프로젝트에서는 미인증 프로젝트의 비공개 고정이 일어나지 않았다(운영 전 감사·할당량 증설 신청은 여전히 필요)
+
+### 실제 방송으로 업로드 한도 확인 (2026-11-21, 11-16 뉴스데스크 320×240 축소본)
+- 실제 MARS-L 큐시트 + 실제 정렬 모델(CPU, 322초): 업로드 대상 25건 중 11건 구간 검출(리포트 5, 단신 6). 녹화본이 20분에서 끝나 뒤쪽 단신 13건은 미검출, 2건은 신뢰도 낮음(수동 지정 대상)
+- 11건 일괄 승인 → 렌더 → 비공개 업로드. 앱의 할당량 계산(1,650 units/건)을 끄고 Google이 막을 때까지 시도
+- **결과: 하루 10번째 업로드까지 성공(앞선 테스트 1건 포함), 11번째에서 `400 uploadLimitExceeded`**("The user has exceeded the number of videos they may upload"). 이것은 프로젝트 units 할당량(`403 quotaExceeded`)이 아니라 **채널의 하루 업로드 개수 한도**다. units 기준(1,600/건)이면 6번째에서 막혔어야 하므로 videos.insert의 실제 비용은 문서의 1,600보다 작다 → Google Cloud 콘솔의 할당량 페이지에서 실제 사용량을 확인하고 `YOUTUBE_QUOTA_INSERT`를 맞출 것
+- 9건 모두 처리 완료(processed), 썸네일 9/9 반영. 막힌 2건은 할당량 대기(태평양 시간 자정 + 5분)로 미뤄짐
+- 고친 것: `uploadLimitExceeded`는 채널 한도이므로 프로젝트 할당량 카운터를 소진 처리하지 않는다(다른 채널은 계속 올릴 수 있게)
+- 운영 영향: 채널당 하루 업로드 개수에 한도가 있다(이 채널은 10건). 뉴스데스크 + 뉴스투데이 리포트·단신을 한 채널에 올리면 넘을 수 있다 → 채널 인증 상태·한도 확인, 필요하면 채널 분리 검토
+
+### M7 뒤에 바뀐 것
+- **유튜브 설명 = `[목포MBC 뉴스]` + 큐시트 원고 그대로 (2026-11-21 사용자 결정, 사용자가 준 예시와 같은 형식)**. 이전에는 앵커 리드 + 꼬리말(취재 기자·방송일)이었다. 원고는 저장한 큐시트 응답(`Rundown.raw`)의 `articleContent`에서 줄 앞뒤 공백, 연속 빈 줄, **표시 줄(◀ 앵 커 ▶, ◀ 리포트 ▶, ◀ SYNC ▶ …) 바로 다음의 빈 줄**만 정리한다(`metadata/script.tidy_script`, 2026-11-21 사용자 요청. ◀ END ▶ 뒤의 빈 줄은 앵커·리포트 구분이라 남긴다). 표시와 편집기 줄바꿈(단어 중간이라도)은 그대로 둔다. 꼬리말은 프로그램 프로필 `description_footer`를 정했을 때만 붙인다. **해시태그는 업로드 때 설명 끝에 붙인다**(빈 줄 뒤 `#a #b`, 이미 있으면 생략. 2026-11-21 사용자 요청 — 바로 전 결정을 되돌림). YouTube 5,000바이트를 넘으면 원고를 줄 단위로 자른다(…). 이미 만든 메타데이터는 "다시 만들기"를 해야 바뀐다
+
+### 실제 채널 확인 절차 (운영 채널을 연결할 때도 같다)
+1. Google Cloud 프로젝트에서 **YouTube Data API v3 사용 설정**, OAuth 동의 화면(외부, 테스트 모드면 채널 소유 Google 계정을 테스트 사용자로 추가), OAuth 클라이언트 **"TV 및 입력 제한 기기"** 생성 → 클라이언트 ID·시크릿
+2. 서버 `.env`: `PUBLISHER=youtube`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `TOKEN_ENCRYPTION_KEY`. 클라우드 세션에서는 시크릿을 `request_credential`(호스트 `oauth2.googleapis.com`, 사용자 이름 = 클라이언트 ID, 비밀번호 = 시크릿, Basic)로 받고 `GOOGLE_CLIENT_SECRET=proxy-injected`. 네트워크에 `oauth2.googleapis.com`, `www.googleapis.com` 허용 필요
+3. 채널 화면 → "Google 계정으로 연결" → google.com/device에 코드 입력 → **테스트 채널(브랜드 계정)** 선택 → 허용
+4. 클립 승인(채널 선택, 비공개 대신 공개 + 예약 몇 분 뒤) → YouTube 스튜디오에서 예약·썸네일·제목·설명 확인 → 예약 시각 뒤 공개 확인
+- **주의**: Google 문서상 2020-07-28 이후 만든 **미인증 API 프로젝트로 올린 영상은 비공개로 잠길 수 있다**(YouTube API 감사 통과 전). 테스트 프로젝트에서는 예약 공개가 됐지만(2026-11-21), 운영 프로젝트도 같은지 확인한다. 감사 신청과 할당량 증설 신청은 같은 양식(YouTube API Services Audit and Quota Extension Form)으로 한다
+- 맞춤 썸네일은 채널이 전화번호 인증을 해야 된다(안 됐으면 썸네일만 실패로 표시)
+
+### M7 시작 가이드 (2026-11-21 작성 — M7 구현 전 기록, 지금 상태는 위 절들을 볼 것)
 
 **먼저 읽을 것**: spec 4.2(클립 상태: `RENDERED → UPLOADING → UPLOADED → PROCESSING → SCHEDULED → PUBLISHED`, `UPLOAD_FAILED`), 5.9(Publisher 인터페이스, YouTube 규격, 할당량), 5.10(재시도 정책 — 본격 구현은 M8), 7(`Channel`, `PublishTask`), 8(`/api/publish-tasks`, `/api/channels`, OAuth 콜백). 이 파일의 "M5에서 정한 것", "M6에서 정한 것"
 
@@ -391,16 +432,66 @@ news-clipper/
 
 ---
 
-## M8. 상태 확인·재시도·알림 (파이프라인 10)
-| # | Task |
-|---|---|
-| 8.1 | 상태 폴링(점진적 간격), processing/rejection 반영 |
-| 8.2 | 오류 유형별 재시도 정책 + 지수 백오프 |
-| 8.3 | 수동 재시도/취소/원격 메타 수정 |
-| 8.4 | 웹 알림 + Slack/메일 Webhook(선택) |
-| 8.5 | 장애 주입 테스트(네트워크 끊김, 401, quotaExceeded, 5xx) |
+## M8. 상태 확인·재시도·알림 (파이프라인 10) — 완료 (2026-11-21)
+> **상태 (2026-11-21)**: 8.1~8.3, 8.5 구현. 외부 알림(8.4)은 만들지 않기로 했다(사용자 결정). 장애 시나리오별 상태 전이를 가짜 플랫폼으로 테스트하고(`tests/test_publish_m8.py`), 업로드 뒤 수정의 자동 반영은 실제 테스트 채널의 비공개 영상에서도 확인했다(아래). 백엔드 테스트 257개, E2E(업로드 뒤 제목 수정 → 반영) 통과.
+
+| # | Task | 상태 |
+|---|---|---|
+| 8.1 | 상태 폴링(점진적 간격), processing/rejection 반영 | 완료 (작업별 `next_check_at`: 처리 중 1·2·4·8분 뒤, 그다음 10분마다. 처리된 예약 영상은 예약 시각 1분 뒤. 게시 뒤 10분·1시간·6시간·24시간에 다시 확인해 거부·삭제를 잡고 그 뒤로는 확인하지 않음) |
+| 8.2 | 오류 유형별 재시도 정책 + 지수 백오프 | 완료 (M7 정책 + 썸네일 일시 오류 자동 재시도 2·10·30분. 권한 거절(forbidden)은 재시도하지 않음) |
+| 8.3 | 수동 재시도/취소/원격 메타 수정 | 완료 (**업로드 뒤 수정은 자동 반영**: 제목·설명·태그·해시태그·공개 범위·예약·썸네일 → `videos.update`/`thumbnails.set`. 반영 실패는 표시 + "다시 반영") |
+| 8.4 | ~~웹 알림 + Slack/메일 Webhook~~ | 하지 않음 (2026-11-21 사용자 결정: 외부 알림 없음. 게시 현황·편집기에 상태·사유·반영 상태 표시) |
+| 8.5 | 장애 주입 테스트(네트워크 끊김, 401, quotaExceeded, 5xx) | 완료 (네트워크, 5xx·5회 연속, 세션 만료, 401, quotaExceeded, uploadLimitExceeded, 잘못된 메타데이터, 게시 뒤 거부 → 새 영상으로 재업로드, 멈춘 워커, 반영 중 수정, 업로드 중 수정) |
 
 **DoD**: 장애 시나리오별 상태 전이와 재시도가 테스트로 검증된다.
+
+### M8에서 정한 것
+- **업로드 뒤 수정 (2026-11-21 사용자 결정: 자동 반영)**: 업로드된(또는 올라가는 중인) 클립은 제목·설명·태그·해시태그·썸네일 문구·썸네일 프레임·공개 범위·예약을 고칠 수 있다. 저장하면 그 클립의 모든 업로드 작업에 반영 대기(`sync_status=pending`)를 걸고 publish 큐에서 `videos.update`(썸네일이 바뀌었으면 `thumbnails.set`도)를 부른다. **채널과 구간은 그대로 잠금**(업로드를 취소해야 바꿈). **이미 게시된 영상은 예약 시각을 바꿀 수 없다**(공개 범위는 바꿀 수 있음). 새 예약 시각은 2분 뒤 이후여야 한다
+- **반영 버전**: 수정마다 `sync_version`이 오르고, 반영이 끝났을 때 그사이 또 수정됐으면 다시 반영한다. 업로드 중에 고친 것은 업로드가 끝난 뒤 반영한다. 아직 올라가지 않은 대기 작업은 최신 메타데이터로 올라간다
+- **반영 실패**: 네트워크·5xx는 1, 2, 4, 8, 16분 뒤 다시(최대 5회), 할당량은 다음 날, 401은 채널 "다시 연결 필요", 거절(400 등)은 실패로 표시하고 "다시 반영" 버튼
+- **`videos.update`는 영상을 먼저 읽고 바꾸는 항목만 합쳐 보낸다**: update는 보낸 part의 모든 속성을 바꾸므로, status를 그대로 보냈더니 실제 영상의 `embeddable`·`publicStatsViewable`이 false로 꺼졌다(2026-11-21 실제 채널에서 발견 → 고침, 그 영상은 되돌림). 비용은 조회 1 + 수정 50 = 51 units(`YOUTUBE_QUOTA_UPDATE`)
+- **상태 확인**: 1분 sweep이 `next_check_at`이 된 작업만 확인한다(M8 이전 작업은 `next_check_at`이 없어 바로 확인). 상태가 바뀌면 간격을 처음부터 센다. 확인도 할당량 1 unit, 할당량 오류면 초기화 뒤로
+- **썸네일 할당량**: 업로드 때 첫 썸네일은 업로드 예약(1,650)에 포함, 재시도·수정 때만 50 units를 더 센다
+- **알림 없음 (2026-11-21 사용자 결정)**: Slack·메일 알림은 만들지 않는다. 화면(게시 현황, 편집기 업로드 칸)에 상태·사유·다음 시도 시각·반영 상태를 보여 준다
+
+### 실제 채널에서 반영 확인 (2026-11-21)
+- 11-16 단신(비공개, `gJT4ax39Zws`) 제목을 앱에서 고침 → `videos.update` 성공, 제목 반영 확인. 이때 `embeddable`·`publicStatsViewable`이 false가 되는 문제를 발견해 "읽고 합쳐 보내기"로 고쳤고, 두 설정을 되돌린 뒤 다시 제목을 원래대로 고쳐 반영(설정 유지, 맞춤 썸네일 유지)까지 확인
+
+### M8 시작 가이드 (2026-11-21 작성 — M8 구현 전 기록, 지금 상태는 위 절들을 볼 것)
+
+**먼저 읽을 것**: spec 5.9(업로드 흐름, YouTube, 할당량·채널 한도), 5.10(상태 대응, 재시도 표 — M7에서 된 것과 M8 몫이 표시돼 있다), 7(`PublishTask`), 16-7·16-8(남은 확인 사항). 이 파일의 "M7에서 정한 것", "실제 방송으로 업로드 한도 확인", "M7 뒤에 바뀐 것"
+
+**지금 상태 (M0~M7, 브랜치 `claude/laughing-hopper-8udxh2` — `main`에 아직 합치지 않음)**
+- 업로드 흐름 전체가 `backend/app/publish/service.py`에 있다: `enqueue`(작업 생성) → `run_upload`(`_claim`에서 할당량 예약 → 업로드 → `set_thumbnail`) → 실패는 `_upload_failed`(오류 종류별 처리) → `apply_remote`(원격 상태 → 작업 상태) → `sync_clip`(클립 상태). 상수 `BACKOFF_MINUTES`, `QUOTA_GRACE`, `PUBLISH_LATE`, `STALE_UPLOAD`
+- 주기 작업: `sweep()`(Celery beat 1분, `publish.sweep`)이 재시도 시각이 된 작업, 멈춘 업로드, 상태 확인 대상(`_check_due`, **고정 간격**)을 골라 `publish.upload`/`publish.check`(publish 큐)로 보낸다. 상태 확인은 `check_status()` — `PUBLISHED`가 되면 더 보지 않는다
+- 수동 조작: `retry()`(실패 → 다시, 원격 영상이 있으면 상태만 다시 확인, 썸네일만 실패면 썸네일만), `cancel()`(원격 영상 삭제), API `api/publish.py`(`/api/publish-tasks/{id}/retry|cancel|check`, `/api/clips/{id}/publish`, `/api/publish/summary`). `Publisher.update()`는 YouTube·Fake 모두 구현돼 있지만 **아무 데서도 부르지 않는다**(8.3 원격 수정의 출발점)
+- 발행 설정 잠금: `review/service.py`의 `PUBLISH_EDITABLE`, `update_metadata()` — 업로드가 시작되면 채널·공개 범위·예약을 바꿀 수 없다(409). 승인 뒤 제목·설명 등은 "다시 열기"로만 고칠 수 있는데, 다시 열기는 올라간 영상이 있으면 막힌다 → 8.3에서 풀어야 한다. 예약 시각이 지난(게시된) 영상의 `publishAt`은 바꿀 수 없다
+- 장애 주입: `FakePublisher(fail={"upload": [PublishError(...)], "set_thumbnail": [...]})`, `factory.set_publisher(lambda ch: ...)`로 바꿔 끼운다. YouTube 프로토콜은 `tests/test_youtube.py`의 `FakeYouTube`(httpx MockTransport: 308 Range, 세션 만료, 401, 오류 사유)
+- 알림 기반: `core/events.py`의 Redis pub/sub → SSE(`/api/events`)는 `{"type": "job", "id": …}`만 보낸다. 화면은 `frontend/src/api/events.ts`가 받아 쿼리를 다시 읽는다. 업로드 이벤트 종류(실패, 재연결 필요, 할당량 소진)를 추가하면 웹 알림의 출발점이 된다. 채널 상태는 `Channel.status`(`reauth_required`)와 `last_error`
+- 화면: 게시 현황 `frontend/src/pages/PublishPage.tsx`(`TaskRow`, `TaskCard` — 편집기에서도 씀), 채널 `ChannelsPage.tsx`, 편집기 업로드 칸 `ClipEditorPage.tsx`의 `PublishStatus`
+- 시각: DB는 UTC로 저장한다(SQLite는 시간대를 버리므로 `_aware()`로 UTC로 본다). 할당량 날짜는 태평양 시간(`publish/quota.py`), 화면 표시는 KST
+
+**만들 것 (제안)**
+- 8.1 폴링: 작업별 다음 확인 시각(예: `next_check_at`, 마이그레이션 0012)을 두고 1 → 2 → 4 → 8 → 10분으로 늘린다. `PUBLISHED` 뒤에도 하루 정도 몇 번 확인해 거부·삭제(`rejected`, 영상 없음)를 잡는다. 상태 확인은 1 unit씩 할당량에 센다(지금도 `quota.add(…, 1)`)
+- 8.2 재시도: 썸네일 실패 자동 재시도(2~3회), `uploadLimitExceeded`의 실제 풀리는 시점 확인(태평양 자정인지, 24시간 이동 창인지 — 지금은 자정으로 가정), 오류 종류·다음 시도 시각을 화면에 분명히
+- 8.3 원격 수정 (**자동 반영으로 결정**, 2026-11-21): 업로드된 클립에서 제목·설명·태그·해시태그·공개 범위·예약을 고칠 수 있게 하고(구간·썸네일 프레임은 영상이 바뀌므로 지금처럼 취소 후 다시), 저장하면 publish 큐에서 `videos.update`로 반영한다. 썸네일 문구를 바꾸면 `thumbnails.set`도 다시. 업로드 중이면 끝난 뒤 반영, 반영 실패는 작업에 경고·다시 시도. 게시된 영상의 예약 변경은 막는다. update도 할당량(50 units)에 센다. 감사 로그에 남긴다
+- 8.4 알림: 외부 알림은 만들지 않는다(2026-11-21 결정). 게시 현황에서 실패·재연결 필요·미뤄짐이 눈에 띄게(필터, 건수) 정도만
+- 8.5 장애 주입 테스트: 시나리오 표(네트워크 끊김 → 이어 올리기, 세션 만료 → 처음부터, 401 → 갱신 → 성공/재연결 필요, quotaExceeded → 다음 날, uploadLimitExceeded → 그 채널만, 5xx 5회 → 실패, 썸네일 실패 → 영상 유지, 처리 거부 → 실패·새 영상으로 재시도, 워커 중단 → 멈춘 업로드 재시작)마다 상태 전이를 확인
+
+**사용자에게 받을 것 / 정할 것**
+- ~~알림 경로~~ → 외부 알림 없음, ~~메타 수정 반영 방식~~ → 자동 반영 (2026-11-21 사용자 결정)
+- YouTube 운영 한도(spec 16-7): 사용자가 나중에 확인한다(Cloud 콘솔의 실제 units 사용량 → `YOUTUBE_QUOTA_INSERT` 조정, 운영 채널의 하루 업로드 개수 한도, 감사·할당량 증설 신청). M8은 지금 설정값으로 진행
+- 테스트 채널에 남은 영상 정리(2026-11-21 테스트: 합성 클립 1건 공개, 11-16 기사 9건 비공개)
+
+**클라우드 세션에서 실제 YouTube로 확인할 때**
+- 환경 news-clipper에 `oauth2.googleapis.com`(OAuth 클라이언트 시크릿을 Basic으로 주입하는 네트워크 비밀 포함), `www.googleapis.com`이 허용돼 있다(2026-11-21). OAuth 클라이언트 ID는 `95445769906-ksq2gtof18b82eau3iqk2sftmhbjche2.apps.googleusercontent.com`("TV 및 입력 제한 기기")
+- 채널 토큰은 세션 안 DB에만 있었으므로 새 세션에서는 채널을 다시 연결한다(기기 코드 방식, 사용자가 google.com/device에 코드 입력). `TOKEN_ENCRYPTION_KEY`는 새로 만들면 된다
+- 실행 예: `PUBLISHER=youtube GOOGLE_CLIENT_ID=… GOOGLE_CLIENT_SECRET=proxy-injected TOKEN_ENCRYPTION_KEY=… NEWSROOM_PROVIDER=marsl MARSL_API_KEY=proxy-injected` + SQLite·`CELERY_ALWAYS_EAGER=true`면 워커 없이 확인할 수 있다(이때 beat가 없으므로 미뤄진 업로드·상태 확인은 `service.sweep()`이나 `/check`를 직접 부른다)
+
+**기존 남은 일 (M8과 별개)**
+- 로그인(M0.7 보류): 채널 연결·해제와 영상 삭제가 누구에게나 열려 있다. 관리자 권한과 함께 정할 것(M9.1과 묶어도 된다)
+- M3.8 원래 골든셋 4편 재현, M4 실제 Claude 호출(키 필요), HD 원본으로 썸네일 판정·렌더 시간 확인, 리포트 썸네일 템플릿 PNG 교체(사용자 제공 예정)
+- 이 브랜치를 `main`에 합칠 PR
 
 ---
 
@@ -429,15 +520,15 @@ news-clipper/
 | M-PoC | 완료 | 방송 4편 검증 |
 | M0 | 완료 | 로그인(0.7) 보류 |
 | M1 | 완료 | |
-| M2 | 3일 | 다음 작업. 파서 핵심 로직은 구현됨. 실제 API 검증(2.10)은 액세스 키 확보 후 |
-| M3 | 5일 | PoC 코드 이전 + 회귀 확인 |
+| M2 | 완료 | |
+| M3 | 완료 | 원래 골든셋 4편 재현 남음 |
 | M4 | 완료 | 실제 Claude 호출·HD 녹화본 확인 남음 |
-| M5 | 구현 | 채널 선택은 M7 뒤 |
+| M5 | 완료 | |
 | M6 | 완료 | HD 원본 렌더 시간 확인 남음 |
-| M7 | 4일 | |
-| M8 | 3일 | |
-| M9 | 4일 | |
-| **합계** | **약 38일 (약 8주)** | |
+| M7 | 완료 | 운영 채널 한도·할당량 확인 남음 |
+| M8 | 완료 | 외부 알림은 하지 않음 |
+| M9 | 4일 | 다음 작업 |
+| **남은 일정** | **약 4일** | M9 (실제 운영 확인 제외) |
 
 ## 선행 준비물
 - [x] 골든셋 방송 4편(11-02, 11-04, 11-05, 11-11)의 큐시트·원고·녹화본 — 단, `eval/data/`는 git에 없으므로 M3 회귀 확인 때 다시 올려야 함
@@ -445,6 +536,6 @@ news-clipper/
 - [x] MARS-L 액세스 키, 실제 응답 샘플 (M2.10, 2026-11-20)
 - [ ] 사내 앱 서버에서 `api.marsl.co.kr` 접근 확인 (클라우드 세션에서는 됨)
 - [ ] Anthropic API 키 (M4 실제 호출 확인용, 없으면 원고 기반 기본값으로 진행). 받을 때는 `request_credential`(호스트 `api.anthropic.com`, 헤더 `x-api-key`)
-- [ ] YouTube 테스트 채널 + Google Cloud OAuth 클라이언트 (M7)
-- [ ] YouTube API 할당량 증설 신청 — 승인에 수 주가 걸릴 수 있어 **조기 신청**
+- [x] YouTube 테스트 채널 + Google Cloud OAuth 클라이언트 (M7, 2026-11-21. "TV 및 입력 제한 기기" 유형)
+- [ ] YouTube API 할당량 증설·감사 신청 — 승인에 수 주가 걸릴 수 있어 **조기 신청**. 신청 전에 Cloud 콘솔의 실제 units 사용량과 운영 채널의 하루 업로드 개수 한도를 확인(spec 16-7)
 - [ ] 정렬 워커용 서버 사양 확인 (CPU 8코어, RAM 16GB 이상 권장)

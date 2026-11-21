@@ -34,21 +34,29 @@ from app.storage import JobFiles
 router = APIRouter(prefix="/api", tags=["jobs"])
 
 
+# Approved clips on their way to (or on) a channel; UPLOAD_FAILED counts as approved, not uploaded.
+UPLOADED = [ClipStatus.UPLOADING, ClipStatus.UPLOADED, ClipStatus.PROCESSING, ClipStatus.SCHEDULED, ClipStatus.PUBLISHED]
+APPROVED_ALSO = [ClipStatus.UPLOAD_FAILED]
+
+
 def clip_counts(db: Session, job_ids: list[int]) -> dict[int, ClipCounts]:
     rows = db.execute(
         select(
             Clip.job_id,
             func.count(),
             func.count(Clip.start_sec),
-            func.sum(case((Clip.status.in_([ClipStatus.APPROVED, ClipStatus.RENDERING, ClipStatus.RENDERED]), 1), else_=0)),
+            func.sum(case((Clip.status.in_([ClipStatus.APPROVED, ClipStatus.RENDERING, ClipStatus.RENDERED, *UPLOADED, *APPROVED_ALSO]), 1), else_=0)),
             func.sum(case((Clip.status == ClipStatus.REJECTED, 1), else_=0)),
+            func.sum(case((Clip.status.in_(UPLOADED), 1), else_=0)),
+            func.sum(case((Clip.status == ClipStatus.UPLOAD_FAILED, 1), else_=0)),
         )
         .where(Clip.job_id.in_(job_ids))
         .group_by(Clip.job_id)
     ).all()
     return {
-        job_id: ClipCounts(total=total, ranged=ranged, approved=approved or 0, rejected=rejected or 0)
-        for job_id, total, ranged, approved, rejected in rows
+        job_id: ClipCounts(total=total, ranged=ranged, approved=approved or 0, rejected=rejected or 0,
+                           uploaded=uploaded or 0, upload_failed=failed or 0)
+        for job_id, total, ranged, approved, rejected, uploaded, failed in rows
     }
 
 

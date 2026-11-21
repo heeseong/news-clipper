@@ -251,9 +251,18 @@ def render_clip(self, clip_id: int) -> str:
         if not current:
             out.unlink(missing_ok=True)
             return "stale"
+        uploads: list[int] = []
         if error:
             clip.status, clip.render_error = ClipStatus.APPROVED, error
         else:
             clip.status, clip.render_path, clip.rendered_at = ClipStatus.RENDERED, str(out), utcnow()
+            if s.publish_auto:  # M7: upload to the clip's channels right away (none chosen → stays RENDERED)
+                from app.publish import service as publishing
+
+                uploads = publishing.enqueue(session, clip, strict=False)
     publish_job_changed(job_id)
+    if uploads:
+        from app.publish import service as publishing
+
+        publishing.dispatch(uploads)
     return "failed" if error else "rendered"

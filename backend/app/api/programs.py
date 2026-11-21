@@ -24,13 +24,22 @@ def _sources(names: list[str]) -> list[str]:
     return list(dict.fromkeys(n.strip() for n in names if n.strip()))
 
 
-def _apply_metadata_settings(program: ProgramProfile, body: ProgramIn) -> None:
+def _apply_metadata_settings(program: ProgramProfile, body: ProgramIn, db) -> None:
     if body.title_template is not None:
         program.title_template = body.title_template.strip() or None
     if body.description_footer is not None:
         program.description_footer = body.description_footer.strip() or None
     if body.default_tags is not None:
         program.default_tags = _sources(body.default_tags)
+    if body.default_channels is not None:
+        from app.publish.channels import ChannelError, active_channels
+
+        ids = list(dict.fromkeys(body.default_channels))
+        try:
+            active_channels(db, ids)
+        except ChannelError as e:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(e)) from e
+        program.default_channels = ids
     if body.thumbnail_template is not None:
         unknown = unknown_keys(body.thumbnail_template)
         if unknown:
@@ -57,7 +66,7 @@ def create_program(body: ProgramIn, db: DbSession) -> ProgramProfile:
         program.dedupe_program = body.dedupe_program.strip() or None
     else:
         program.dedupe_program = DEFAULT_DEDUPE_PROGRAM.get(name)
-    _apply_metadata_settings(program, body)
+    _apply_metadata_settings(program, body, db)
     db.add(program)
     db.commit()
     return program
@@ -77,7 +86,7 @@ def update_program(program_id: int, body: ProgramIn, db: DbSession) -> ProgramPr
         program.dedupe_program = body.dedupe_program.strip() or None
     if body.pronunciations is not None:
         program.pronunciations = {k.strip(): v.strip() for k, v in body.pronunciations.items() if k.strip()}
-    _apply_metadata_settings(program, body)
+    _apply_metadata_settings(program, body, db)
     db.commit()
     return program
 

@@ -884,3 +884,126 @@ div.rundown-preview.warn-box {
 .tl-block.clip.status-RENDERED {
   background: #1d7a46;
 }
+
+/* --- publishing (M7) --- */
+.ok-box {
+  background: #e3f4ea;
+  color: var(--ok);
+  border: 1px solid #b9dfc8;
+  border-radius: 4px;
+  padding: 0.5rem 0.75rem;
+}
+.connect-box,
+.publish-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+.device-code {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  max-width: 40rem;
+}
+.user-code {
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  font-family: ui-monospace, monospace;
+}
+.channel-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  vertical-align: middle;
+  margin-right: 0.4rem;
+}
+.summary-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+.summary-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.6rem 0.8rem;
+  min-width: 16rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.summary-card meter {
+  width: 100%;
+}
+.channel-picker {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.3rem 0.6rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+}
+label.inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.nowrap {
+  white-space: nowrap;
+}
+.link.danger {
+  color: var(--error);
+}
+.tag.status-UPLOADING,
+.tag.status-UPLOADED,
+.tag.status-PROCESSING,
+.tag.publish-QUEUED,
+.tag.publish-UPLOADING,
+.tag.publish-UPLOADED,
+.tag.publish-PROCESSING {
+  background: #e4edfb;
+  color: var(--busy);
+}
+.tag.status-SCHEDULED,
+.tag.status-PUBLISHED,
+.tag.publish-SCHEDULED,
+.tag.publish-PUBLISHED,
+.tag.channel-active {
+  background: #e3f4ea;
+  color: var(--ok);
+}
+.tag.status-UPLOAD_FAILED,
+.tag.publish-FAILED,
+.tag.channel-reauth_required {
+  background: #fde8e6;
+  color: var(--error);
+}
+.tag.publish-CANCELLED,
+.tag.channel-disconnected {
+  color: var(--muted);
+}
+.tl-block.clip.status-UPLOADING,
+.tl-block.clip.status-UPLOADED,
+.tl-block.clip.status-PROCESSING,
+.tl-block.clip.status-SCHEDULED,
+.tl-block.clip.status-PUBLISHED {
+  background: #1d7a46;
+}
+.tl-block.clip.status-UPLOAD_FAILED {
+  background: #b42318;
+}
+.task-card {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.4rem 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.channel-picker label.inline {
+  flex-direction: row;
+}

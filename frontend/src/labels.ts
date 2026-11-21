@@ -152,6 +152,31 @@ export const CLIP_STATUS_LABEL: Record<string, string> = {
   RENDERING: "렌더 중",
   RENDERED: "렌더 완료",
   REJECTED: "반려",
+  UPLOADING: "업로드 중",
+  UPLOADED: "업로드됨",
+  PROCESSING: "처리 중",
+  SCHEDULED: "예약됨",
+  PUBLISHED: "게시됨",
+  UPLOAD_FAILED: "업로드 실패",
+};
+
+export const PUBLISH_STATUS_LABEL: Record<string, string> = {
+  QUEUED: "대기",
+  UPLOADING: "업로드 중",
+  UPLOADED: "업로드됨",
+  PROCESSING: "YouTube 처리 중",
+  SCHEDULED: "예약됨",
+  PUBLISHED: "게시됨",
+  FAILED: "실패",
+  CANCELLED: "취소",
+};
+
+export const PRIVACY_LABEL: Record<string, string> = { private: "비공개", unlisted: "일부 공개", public: "공개" };
+
+export const CHANNEL_STATUS_LABEL: Record<string, string> = {
+  active: "연결됨",
+  reauth_required: "다시 연결 필요",
+  disconnected: "연결 해제",
 };
 
 /** Snap a dragged boundary to a scene cut nearby: a clip starts one frame after a cut and ends

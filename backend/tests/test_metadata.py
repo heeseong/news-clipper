@@ -27,6 +27,10 @@ REPORT = ClipScript(
     station="목포MBC",
 )
 REPORT.all_text = "\n".join([REPORT.title, *REPORT.lead, *REPORT.body, "엠비씨 뉴스 홍길동입니다."])
+REPORT.script_text = (
+    "◀ 앵 커 ▶\n목포시와 신안군을 잇는 새 다리가\n오늘 개통했습니다.\n\n◀ 리포트 ▶\n길이 1킬로미터의 다리가 문을 열었습니다.\n\n"
+    "◀ 인터뷰 ▶ 김주민\n이제 병원 가기가 편해졌습니다.\n\nMBC 뉴스 홍길동입니다."
+)
 REPORT_SPLIT = ClipScript(**{**REPORT.__dict__, "title": "압해도 새 다리…오늘 개통"})
 BRIEF = ClipScript(
     kind="brief",
@@ -70,17 +74,65 @@ class StaticProvider(LLMProvider):
 def test_report_defaults_come_from_the_script():
     d = defaults.build(REPORT, None, ["뉴스", "목포MBC"])
     assert d.title == "압해도 새 다리 개통[목포MBC 뉴스데스크]"  # like the channel
-    lead, footer = d.description.split("\n\n")
-    assert lead == "목포시와 신안군을 잇는 새 다리가 오늘 개통했습니다. 공사비 1,200억 원이 들었습니다."
-    assert footer == "취재: 홍길동 기자\n목포MBC 뉴스데스크 2026년 11월 4일 방송"
+    # "[목포MBC 뉴스]", then the newsroom script as written; no footer unless the program has one.
+    assert d.description == "[목포MBC 뉴스]\n" + REPORT.script_text
+    with_footer = defaults.build(REPORT, "{reporter_credit}", [])
+    assert with_footer.description == "[목포MBC 뉴스]\n" + REPORT.script_text + "\n\n취재: 홍길동 기자"
     assert d.tags == ["뉴스", "목포MBC", "홍길동", "목포", "신안"]
     assert d.thumbnail_text == "압해도 새 다리 개통"
 
 
-def test_brief_description_is_the_whole_text_and_footer_template_is_used():
+def test_description_fits_youtube_and_keeps_the_footer():
+    long = "\n\n".join(f"{i}번째 문단입니다. 아주 긴 원고가 이어집니다." for i in range(400))
+    d = defaults.build(ClipScript(**{**REPORT.__dict__, "script_text": long}), None, [])
+    assert len(defaults.build(ClipScript(**{**REPORT.__dict__, "script_text": long}), "{reporter_credit}", []).description.encode()) <= 5000
+    assert len(d.description.encode()) <= 5000
+    assert d.description.startswith("[목포MBC 뉴스]\n0번째") and d.description.endswith("…")
+
+
+USER_EXAMPLE = """◀ 앵 커 ▶
+전남 국립의대 선정 과정의 공정성 논란으로
+시작된 서남권 시민들의 정례 집회가
+77일 만에 막을 내렸습니다.
+
+신광하 기자 입니다.
+◀ END ▶
+
+◀ 리포트 ▶
+
+◀ SYNC ▶
+"(순천대 의대 추천안을) 즉각 반려하라! 반려
+하라! 반려하라!"
+
+MBC 뉴스 신광하 입니다.
+◀ END ▶"""
+
+
+def test_description_matches_the_users_example():
+    """The format the user gave (2026-11-21): header line, then the script exactly as written,
+    editor line breaks (even inside a word) and ◀ ▶ markers included."""
+    from app.metadata.script import tidy_script
+
+    raw = USER_EXAMPLE.replace("\n전남", "\n 전남").replace("입니다.\n◀ END", "입니다.  \n◀ END") + "\n"
+    script = ClipScript(**{**REPORT.__dict__, "script_text": tidy_script(raw)})
+    expected = USER_EXAMPLE.replace("◀ 리포트 ▶\n\n", "◀ 리포트 ▶\n")  # no blank after a marker
+    assert defaults.build(script, None, []).description == "[목포MBC 뉴스]\n" + expected
+
+
+def test_script_whitespace_is_tidied_but_the_text_kept():
+    from app.metadata.script import tidy_script
+
+    raw = "◀ 앵 커 ▶\r\n\n 민형배 시장이 \n항의했습니다.\n\n\n\n 서일영 기자입니다.  \n"
+    assert tidy_script(raw) == "◀ 앵 커 ▶\n민형배 시장이\n항의했습니다.\n\n서일영 기자입니다."
+    # No blank line right after a marker (2026-11-21), but the one after ◀ END ▶ stays.
+    raw = "◀ 앵 커 ▶\n\n앵커 문장\n◀ END ▶\n\n◀ 리포트 ▶\n\n◀ SYNC ▶ 김주민 / 주민\n\n인터뷰\n"
+    assert tidy_script(raw) == "◀ 앵 커 ▶\n앵커 문장\n◀ END ▶\n\n◀ 리포트 ▶\n◀ SYNC ▶ 김주민 / 주민\n인터뷰"
+
+
+def test_brief_description_without_a_stored_script_uses_its_text_and_footer_template():
     d = defaults.build(BRIEF, "{program} | {date}\n{reporter_credit}\n{unknown}", [])
     assert d.description == (
-        "진도군이 겨울 축제 준비에 들어갔습니다. 올해는 체험 행사가 늘어납니다.\n\n뉴스데스크 | 2026년 11월 4일"
+        "[목포MBC 뉴스]\n진도군이 겨울 축제 준비에 들어갔습니다. 올해는 체험 행사가 늘어납니다.\n\n뉴스데스크 | 2026년 11월 4일"
     )
     assert d.tags == ["진도"]
 

@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from app.api import clips, events, health, jobs, media, newsroom, programs, review, uploads
+from app.api import channels, clips, events, health, jobs, media, newsroom, programs, publish, review, uploads
 from app.core.config import get_settings
 from app.core.logging import setup_logging
 
@@ -82,6 +82,8 @@ def create_app() -> FastAPI:
     app.include_router(newsroom.router)
     app.include_router(clips.router)
     app.include_router(review.router)
+    app.include_router(channels.router)
+    app.include_router(publish.router)
     app.include_router(uploads.router)
     app.include_router(events.router)
     app.include_router(media.router)

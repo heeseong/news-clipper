@@ -14,16 +14,22 @@ import {
   useThumbnailActions,
   useWaveform,
 } from "../api/review";
-import type { AlignedSentence, Clip, ClipDetail, ClipMetadata, ClipPatch } from "../api/types";
+import { useChannels, usePublishClip } from "../api/publish";
+import type { AlignedSentence, Channel, Clip, ClipDetail, ClipMetadata, ClipPatch } from "../api/types";
 import { BoundaryStrip } from "../components/BoundaryStrip";
 import { CLIP_FLAG_LABEL, CLIP_STATUS_LABEL, SENTENCE_KIND_LABEL, SNAP_LABEL, formatDuration, timecode } from "../labels";
 import { useReviewer } from "../reviewer";
+import { TaskCard } from "./PublishPage";
 
 const LOW_SCORE = -5; // alignment score below which a sentence is shown as doubtful (PoC threshold)
 const LOOP_SECONDS = 3;
 const TITLE_MAX = 100;
 const EDITABLE = ["DRAFT", "NOT_FOUND"];
-const REOPENABLE = ["APPROVED", "RENDERING", "RENDERED", "REJECTED"];
+const REOPENABLE = ["APPROVED", "RENDERING", "RENDERED", "REJECTED", "UPLOAD_FAILED"];
+// Publishing settings (channels, visibility, schedule) can change until the upload starts.
+const PUBLISH_EDITABLE = [...EDITABLE, "APPROVED", "RENDERING", "RENDERED", "UPLOAD_FAILED"];
+// Uploaded (or on its way): metadata and thumbnail edits are pushed to YouTube (M8). Not the range.
+const UPLOADED = ["UPLOADING", "UPLOADED", "PROCESSING", "SCHEDULED", "PUBLISHED", "UPLOAD_FAILED"];
 
 const KEYS: [string, string][] = [
   ["Space", "재생/정지"],
@@ -73,8 +79,10 @@ function Editor({ jobId, fps, duration, clip, clips }: { jobId: number; fps: num
   const [loop, setLoop] = useState<[number, number] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const editable = EDITABLE.includes(clip.status);
-  const holder = useClipLock(clip.id, editable);
+  const uploaded = UPLOADED.includes(clip.status);
+  const holder = useClipLock(clip.id, editable || uploaded);
   const readOnly = !editable || !!holder;
+  const metaReadOnly = !(editable || uploaded) || !!holder;
 
   const analysis = useAnalysis(jobId, "editor");
   const waveform = useWaveform(jobId);
@@ -301,9 +309,19 @@ function Editor({ jobId, fps, duration, clip, clips }: { jobId: number; fps: num
         </section>
 
         <section className="editor-right">
-          <ThumbnailPanel clip={clip} readOnly={readOnly} currentTime={t} run={run} />
+          <ThumbnailPanel clip={clip} readOnly={metaReadOnly} currentTime={t} run={run} />
           {clip.metadata ? (
-            <MetadataForm key={clip.metadata.generated_at ?? ""} clip={clip} meta={clip.metadata} readOnly={readOnly} save={(p) => run(patch.mutateAsync(p))} saving={patch.isPending} />
+            <MetadataForm
+              key={clip.metadata.generated_at ?? ""}
+              clip={clip}
+              meta={clip.metadata}
+              readOnly={metaReadOnly}
+              publishEditable={(PUBLISH_EDITABLE.includes(clip.status) || uploaded) && !holder}
+              channelsEditable={PUBLISH_EDITABLE.includes(clip.status) && !holder}
+              uploaded={uploaded}
+              save={(p) => run(patch.mutateAsync(p))}
+              saving={patch.isPending}
+            />
           ) : (
             <p className="muted small">메타데이터는 구간을 정하면 만들어집니다.</p>
           )}
@@ -329,6 +347,7 @@ function Editor({ jobId, fps, duration, clip, clips }: { jobId: number; fps: num
             )}
             {clip.reject_reason && <p className="small">반려 사유: {clip.reject_reason}</p>}
             <RenderStatus clip={clip} busy={action.isPending} onRender={() => void run(action.mutateAsync({ action: "render" }))} />
+            <PublishStatus clip={clip} run={run} />
             <div className="approve-buttons">
               {editable ? (
                 <>
@@ -352,7 +371,7 @@ function Editor({ jobId, fps, duration, clip, clips }: { jobId: number; fps: num
                     className="btn"
                     disabled={action.isPending}
                     onClick={() => {
-                      if (!clip.render_url || window.confirm("다시 열면 렌더한 파일을 지웁니다. 계속할까요?"))
+                      if (!clip.render_url || window.confirm("다시 열면 렌더한 파일을 지우고 대기 중인 업로드를 취소합니다. 계속할까요?"))
                         void run(action.mutateAsync({ action: "reopen" }));
                     }}
                   >
@@ -452,7 +471,10 @@ function splitList(v: string): string[] {
   return v.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
 }
 
-function MetadataForm({ clip, meta, readOnly, save, saving }: { clip: ClipDetail; meta: ClipMetadata; readOnly: boolean; save: (p: ClipPatch) => Promise<void>; saving: boolean }) {
+function MetadataForm({ clip, meta, readOnly, publishEditable, channelsEditable, uploaded, save, saving }: { clip: ClipDetail; meta: ClipMetadata; readOnly: boolean; publishEditable: boolean; channelsEditable: boolean; uploaded: boolean; save: (p: ClipPatch) => Promise<void>; saving: boolean }) {
+  // A video already public keeps the time it went public (the visibility can still change).
+  const scheduleLocked = clip.publish_tasks.some((t) => t.status === "PUBLISHED");
+  const channels = useChannels();
   const initial = useMemo(
     () => ({
       title: meta.title,
@@ -462,6 +484,7 @@ function MetadataForm({ clip, meta, readOnly, save, saving }: { clip: ClipDetail
       thumbnail_text: meta.thumbnail_text,
       privacy: meta.privacy,
       publish_at: toKstInput(meta.publish_at),
+      channel_ids: [...meta.channel_ids].sort().join(","),
     }),
     [meta],
   );
@@ -473,8 +496,9 @@ function MetadataForm({ clip, meta, readOnly, save, saving }: { clip: ClipDetail
     return () => window.clearTimeout(timer);
   }, [f.thumbnail_text]);
 
+  const publishOnly = readOnly && publishEditable;
   const submit = useCallback(() => {
-    if (!dirty || readOnly) return;
+    if (!dirty || (readOnly && !publishEditable)) return;
     const p: ClipPatch = {};
     if (f.title !== initial.title) p.title = f.title;
     if (f.description !== initial.description) p.description = f.description;
@@ -486,8 +510,13 @@ function MetadataForm({ clip, meta, readOnly, save, saving }: { clip: ClipDetail
       if (f.publish_at) p.publish_at = fromKstInput(f.publish_at);
       else p.clear_publish_at = true;
     }
+    if (f.channel_ids !== initial.channel_ids) p.channel_ids = f.channel_ids ? f.channel_ids.split(",").map(Number) : [];
+    if (readOnly) {
+      // After approval only the publishing settings can change.
+      for (const k of ["title", "description", "tags", "hashtags", "thumbnail_text"] as const) delete p[k];
+    }
     void save(p);
-  }, [dirty, f, initial, readOnly, save]);
+  }, [dirty, f, initial, readOnly, publishEditable, save]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -547,13 +576,13 @@ function MetadataForm({ clip, meta, readOnly, save, saving }: { clip: ClipDetail
         <input value={f.tags} onChange={set("tags")} disabled={readOnly} />
       </label>
       <label>
-        해시태그
+        해시태그 <span className="muted">(업로드할 때 설명 끝에 붙습니다)</span>
         <input value={f.hashtags} onChange={set("hashtags")} disabled={readOnly} />
       </label>
       <div className="row">
         <label>
           공개 설정
-          <select value={f.privacy} onChange={set("privacy")} disabled={readOnly}>
+          <select value={f.privacy} onChange={set("privacy")} disabled={!publishEditable}>
             <option value="private">비공개</option>
             <option value="unlisted">일부 공개</option>
             <option value="public">공개</option>
@@ -561,13 +590,50 @@ function MetadataForm({ clip, meta, readOnly, save, saving }: { clip: ClipDetail
         </label>
         <label>
           예약 (KST, 비우면 처리 후 바로)
-          <input type="datetime-local" value={f.publish_at} onChange={set("publish_at")} disabled={readOnly} />
+          <input type="datetime-local" value={f.publish_at} onChange={set("publish_at")} disabled={!publishEditable || scheduleLocked} />
         </label>
       </div>
-      <button className="btn" type="submit" disabled={!dirty || readOnly || saving}>
+      <ChannelPicker
+        channels={channels.data?.channels ?? []}
+        value={f.channel_ids}
+        disabled={!channelsEditable}
+        onChange={(v) => setF({ ...f, channel_ids: v })}
+      />
+      {publishOnly && <p className="small muted">승인한 뒤에는 발행 설정(채널·공개·예약)만 바꿀 수 있습니다.</p>}
+      {uploaded && !readOnly && (
+        <p className="small muted">
+          업로드된 클립입니다. 저장하면 YouTube에 자동으로 반영됩니다(썸네일 포함). 채널과 구간은 업로드를 취소해야 바꿀 수 있습니다.
+          {scheduleLocked && " 이미 게시된 영상이라 예약 시각은 바꿀 수 없습니다."}
+        </p>
+      )}
+      <button className="btn" type="submit" disabled={!dirty || (readOnly && !publishEditable) || saving}>
         {saving ? "저장 중…" : dirty ? "저장 (Ctrl+S)" : "저장됨"}
       </button>
     </form>
+  );
+}
+
+function ChannelPicker({ channels, value, disabled, onChange }: { channels: Channel[]; value: string; disabled: boolean; onChange: (v: string) => void }) {
+  const selected = value ? value.split(",").map(Number) : [];
+  const shown = channels.filter((c) => c.status === "active" || selected.includes(c.id));
+  const toggle = (id: number, on: boolean) =>
+    onChange((on ? [...selected, id] : selected.filter((x) => x !== id)).sort((a, b) => a - b).join(","));
+  return (
+    <fieldset className="channel-picker">
+      <legend className="small">업로드 채널</legend>
+      {shown.length === 0 ? (
+        <span className="small muted">
+          연결된 채널이 없습니다 (<Link to="/channels">채널 연결</Link>). 채널 없이 승인하면 렌더까지만 합니다.
+        </span>
+      ) : (
+        shown.map((c) => (
+          <label key={c.id} className="small inline">
+            <input type="checkbox" checked={selected.includes(c.id)} disabled={disabled || c.status !== "active"} onChange={(e) => toggle(c.id, e.target.checked)} /> {c.name}
+            {c.status !== "active" && <span className="warn-text"> (다시 연결 필요)</span>}
+          </label>
+        ))
+      )}
+    </fieldset>
   );
 }
 
@@ -580,6 +646,10 @@ const ACTION_LABEL: Record<string, string> = {
   approve: "승인",
   reject: "반려",
   reopen: "다시 열기",
+  render: "다시 렌더",
+  publish: "업로드",
+  publish_retry: "업로드 다시 시도",
+  publish_cancel: "업로드 취소",
 };
 
 function AuditList({ clipId, version }: { clipId: number; version: string }) {
@@ -602,7 +672,7 @@ function AuditList({ clipId, version }: { clipId: number; version: string }) {
 
 /** The final render (M6): progress, the result to watch and download, or the error. */
 function RenderStatus({ clip, busy, onRender }: { clip: ClipDetail; busy: boolean; onRender: () => void }) {
-  if (!["APPROVED", "RENDERING", "RENDERED"].includes(clip.status)) return null;
+  if (!["APPROVED", "RENDERING", "RENDERED"].includes(clip.status) && !clip.render_url) return null;
   if (clip.render_error)
     return (
       <div className="render-box">
@@ -610,7 +680,7 @@ function RenderStatus({ clip, busy, onRender }: { clip: ClipDetail; busy: boolea
         <button className="btn btn-small" disabled={busy} onClick={onRender}>다시 렌더</button>
       </div>
     );
-  if (clip.status !== "RENDERED" || !clip.render_url)
+  if (!clip.render_url)
     return <p className="small muted render-box">원본 화질로 렌더하는 중입니다…</p>;
   return (
     <div className="render-box">
@@ -627,6 +697,32 @@ function RenderStatus({ clip, busy, onRender }: { clip: ClipDetail; busy: boolea
         {" · "}
         <button className="link" disabled={busy} onClick={onRender}>다시 렌더</button>
       </div>
+    </div>
+  );
+}
+
+/** Uploads of the clip (M7): one row per channel, and "업로드" when it has not been sent yet. */
+function PublishStatus({ clip, run }: { clip: ClipDetail; run: (p: Promise<unknown>) => Promise<void> }) {
+  const publish = usePublishClip(clip.id);
+  const channels = clip.metadata?.channel_ids ?? [];
+  const pending = channels.filter((id) => !clip.publish_tasks.some((t) => t.channel_id === id && t.status !== "FAILED"));
+  const canPublish = ["RENDERED", "UPLOAD_FAILED"].includes(clip.status) && pending.length > 0;
+  if (!clip.publish_tasks.length && !canPublish) {
+    if (clip.status === "RENDERED")
+      return <p className="small muted">업로드 채널을 고르지 않아 렌더까지만 했습니다. 채널을 고르고 저장하면 업로드할 수 있습니다.</p>;
+    return null;
+  }
+  return (
+    <div className="publish-box">
+      <h2>업로드</h2>
+      {clip.publish_tasks.map((t) => (
+        <TaskCard key={t.id} task={t} />
+      ))}
+      {canPublish && (
+        <button className="btn btn-primary btn-small" disabled={publish.isPending} onClick={() => void run(publish.mutateAsync())}>
+          {clip.status === "UPLOAD_FAILED" ? "다시 업로드" : `${pending.length}개 채널에 업로드`}
+        </button>
+      )}
     </div>
   );
 }

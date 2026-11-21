@@ -16,6 +16,8 @@ dependencies = [
     "numpy>=1.26",
     "ctc-segmentation>=1.7",  # forced alignment (spec 5.5)
     "anthropic>=2.11",  # LLM suggestions for titles and descriptions (spec 5.7)
+    "cryptography>=43",  # channel tokens encrypted at rest (Fernet, spec 7)
+    "tzdata>=2024.1",  # YouTube quota day (Pacific time) on images without system zoneinfo
     "pillow>=11",  # thumbnail text overlay
     "opencv-python-headless>=4.10",  # thumbnail scoring: sharpness, faces (YuNet)
 ]

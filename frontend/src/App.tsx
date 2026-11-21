@@ -1,9 +1,11 @@
 import { Link, Navigate, Route, Routes } from "react-router-dom";
 
 import { Layout } from "./components/Layout";
+import { ChannelsPage } from "./pages/ChannelsPage";
 import { ClipEditorPage } from "./pages/ClipEditorPage";
 import { JobDetailPage } from "./pages/JobDetailPage";
 import { JobListPage } from "./pages/JobListPage";
+import { PublishPage } from "./pages/PublishPage";
 import { UploadPage } from "./pages/UploadPage";
 
 export function App() {
@@ -15,6 +17,8 @@ export function App() {
         <Route path="jobs/:id" element={<JobDetailPage />} />
         <Route path="jobs/:id/clips/:clipId" element={<ClipEditorPage />} />
         <Route path="upload" element={<UploadPage />} />
+        <Route path="publish" element={<PublishPage />} />
+        <Route path="channels" element={<ChannelsPage />} />
         <Route
           path="*"
           element={
