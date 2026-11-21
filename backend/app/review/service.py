@@ -144,8 +144,14 @@ def set_range(session: Session, clip: Clip, user: User, start: float, end: float
 METADATA_FIELDS = ("title", "description", "tags", "hashtags", "thumbnail_text", "privacy", "publish_at", "channel_ids")
 
 
+PUBLISH_FIELDS = {"privacy", "publish_at", "channel_ids"}  # do not change the render
+
+
 def update_metadata(session: Session, clip: Clip, user: User, changes: dict[str, Any]) -> ClipMetadata:
-    _editable(clip, user)
+    if set(changes) <= PUBLISH_FIELDS and clip.status in APPROVED_STATES:
+        check_lock(clip, user)  # publishing settings can still change after approval
+    else:
+        _editable(clip, user)
     meta = session.get(ClipMetadata, clip.id)
     if meta is None:
         raise ReviewError("메타데이터가 아직 없습니다 (구간을 정하면 만들어집니다)")

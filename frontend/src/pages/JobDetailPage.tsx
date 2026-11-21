@@ -334,7 +334,7 @@ function BulkBar({ clips }: { clips: Clip[] }) {
   const [first, setFirst] = useState("");
   const [interval, setInterval_] = useState(10);
   const [result, setResult] = useState<string | null>(null);
-  const ids = clips.filter((c) => c.status === "DRAFT" || c.status === "APPROVED").map((c) => c.id);
+  const ids = clips.filter((c) => ["DRAFT", "APPROVED", "RENDERING", "RENDERED"].includes(c.status)).map((c) => c.id);
   if (!clips.length) return null;
   const report = (rows: { ok: boolean; clip_id: number; problems: string[]; error: string | null }[]) => {
     const failed = rows.filter((r) => !r.ok);

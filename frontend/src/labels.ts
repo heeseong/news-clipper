@@ -149,6 +149,8 @@ export const CLIP_STATUS_LABEL: Record<string, string> = {
   DRAFT: "검수 전",
   NOT_FOUND: "구간 지정 필요",
   APPROVED: "승인",
+  RENDERING: "렌더 중",
+  RENDERED: "렌더 완료",
   REJECTED: "반려",
 };
 

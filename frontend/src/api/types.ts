@@ -220,6 +220,9 @@ export interface Clip {
   reject_reason: string | null;
   kind: "report" | "brief";
   locked_by_name: string | null;
+  rendered_at: string | null;
+  render_error: string | null;
+  render_url: string | null;
 }
 
 export interface TextCandidate {

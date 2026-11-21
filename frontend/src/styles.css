@@ -864,3 +864,23 @@ div.rundown-preview.warn-box {
   align-items: center;
   margin-bottom: 0.4rem;
 }
+.render-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 0.5rem;
+}
+.render-video {
+  width: 100%;
+  background: #000;
+  border-radius: 4px;
+}
+.tag.status-RENDERED,
+.tag.status-RENDERING {
+  background: #e3f4ea;
+  color: var(--ok);
+}
+.tl-block.clip.status-RENDERING,
+.tl-block.clip.status-RENDERED {
+  background: #1d7a46;
+}
