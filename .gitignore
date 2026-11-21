@@ -17,3 +17,6 @@ storage/
 
 # Frontend
 node_modules/
+
+# Redis snapshots from local runs
+dump.rdb

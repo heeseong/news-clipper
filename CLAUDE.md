@@ -5,7 +5,7 @@
 
 ## 먼저 읽을 것
 - `spec.md` — 기능 명세(v1.3). 정렬·경계 규칙의 근거는 5.5절, 업로드·재시도는 5.9~5.10절
-- `plan.md` — 마일스톤과 진행 상태. M0~M6 구현(로그인 보류, M3는 원래 골든셋 4편 재현, M4는 실제 Claude 호출·HD 녹화본 확인이 남음, M6는 HD 원본 렌더 시간 확인이 남음). **M7(YouTube 업로드·예약 발행)** 완료(테스트 채널에서 예약 공개 확인). **M8(상태 확인·재시도)** 완료(외부 알림은 하지 않음, 업로드 뒤 수정은 YouTube에 자동 반영). 다음 작업은 **M9(운영 준비)**. 각 마일스톤의 "정한 것"에 규칙이 있다
+- `plan.md` — 마일스톤과 진행 상태. M0~M6 구현(로그인 보류, M3는 원래 골든셋 4편 재현, M4는 실제 Claude 호출·HD 녹화본 확인이 남음, M6는 HD 원본 렌더 시간 확인이 남음). **M7(YouTube 업로드·예약 발행)** 완료(테스트 채널에서 예약 공개 확인). **M8(상태 확인·재시도)** 완료(외부 알림은 하지 않음, 업로드 뒤 수정은 YouTube에 자동 반영). 다음 작업은 **M9(운영 준비)**: M9 절의 **"M9 시작 가이드"**에 지금 상태, 연결점, 만들 것, 사용자에게 받을 것이 정리돼 있다. 각 마일스톤의 "정한 것"에 규칙이 있다
 - `eval/poc/RESULTS.md` — 정렬 PoC 결과와 방송별 실패 사례
 
 ## 핵심 결정 (바꾸기 전에 사용자와 확인)
@@ -41,7 +41,7 @@
 - `backend/app/publish/` — 업로드(M7): Publisher 인터페이스(`base.py`), 가짜 플랫폼(`fake.py`), YouTube 어댑터(`youtube.py`, httpx), Google OAuth(`oauth.py`), 채널 연결(`channels.py`), 토큰 암호화(`crypto.py`), 할당량(`quota.py`), 선택·토큰 갱신(`factory.py`), 업로드 흐름·재시도·상태 확인·업로드 뒤 수정 반영(`service.py`), Celery 태스크(`tasks.py`, publish 큐 + beat `publish.sweep` 1분). 라우터 `api/channels.py`, `api/publish.py`. 설정 `PUBLISHER=fake|youtube`
 - `backend/tests/` — 단위 테스트. `tests/fixtures/synthetic.py`는 FFmpeg 합성 테스트 영상(컷·무음 위치를 알고 있음)
 - `frontend/` — React + Vite + TS. `src/api/`(API 클라이언트·TanStack Query 훅), `src/pages/`(작업 목록·상세, 업로드, 클립 편집기 `ClipEditorPage`, 게시 현황 `PublishPage`, 채널 `ChannelsPage`), `e2e/`(Playwright E2E, `npm run e2e`)
-- `docker-compose.yml` — 서버 한 대 배포(postgres, redis, migrate, api, 워커 4개, beat, web)
+- `docker-compose.yml` — 서버 한 대 배포(postgres, redis, migrate, api, 워커 4개, beat, web). `README.md` — 구성, 실행, 주요 설정
 - `eval/tools/` — MARS-L 출력물(PDF) → API 형식 JSON 변환기(API 키를 받기 전 임시용), 파싱 검토 리포트 생성
 - `eval/poc/` — 정렬 PoC 스크립트(`compute_logits.py`, `align_poc.py`). 서비스 코드는 `backend/app/align/`
 - `eval/tools/score_alignment.py` — 서비스 정렬을 녹화본 한 편에 돌려 `ground_truth.json`과 비교(골든셋 회귀)
