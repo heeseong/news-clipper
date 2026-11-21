@@ -302,6 +302,37 @@ news-clipper/
 
 **DoD**: 승인된 클립이 원본 화질로 렌더되고, 시작 프레임이 검수 화면에서 지정한 프레임과 같다는 것이 테스트로 검증된다.
 
+### M6 시작 가이드 (새 세션용, 2026-11-21 작성)
+
+**먼저 읽을 것**: spec 4.2(클립 상태), 5.6 6-b(렌더 규격), 5.8 승인 조건, 6.2(저장 경로 `clips/{clip_id}/final.mp4`), 9(성능: 클립 1건 렌더 ≤ 1분). CLAUDE.md의 "PoC에서 배운 주의점"(프레임 정확 자르기, 파일 시작 기준 시각). 이 파일의 "M5에서 정한 것"
+
+**지금 상태 (M0~M5 완료, `main`)**
+- 검수·승인까지 된다. 승인은 `backend/app/review/service.py`의 `approve()`(끝에 `# The final render (M6) starts from here.`), API는 `POST /api/clips/{id}/approve`와 일괄 승인 `POST /api/clips/bulk`(`api/review.py`). 승인 뒤에는 고칠 수 없고 "다시 열기"(`reopen()`, `APPROVED/REJECTED → DRAFT`)로만 바뀐다 → **6.3의 "승인 후 경계 변경"은 다시 열기 = 렌더 무효화**로 처리하면 된다
+- 클립 모델: `models/clip.py`의 `Clip`. `ClipStatus`에 `RENDERING`, `RENDERED`가 이미 있고 `render_path` 칼럼도 있다(비어 있음). 구간은 `start_sec`/`end_sec`(파일 시작 기준 초, 소수 3자리). 프레임 레이트는 `Job.fps`, 원본 정보는 `jobs/{id}/source/probe.json`(`ProbeResult`: `video_start`, `interlaced`, `audio[]`, `fps_rational`)
+- 원본·오디오 트랙: `pipeline/handlers.py`의 `load_source()`가 원본 경로·probe·프로그램 오디오 트랙(`ProgramProfile.audio_track`, None = 기본/전체)을 준다. 프록시는 `media/proxy.py`(`-map 0:a:{order}`), 정렬 오디오는 `media/analysis.py`(트랙이 여럿이면 amix) 참고. 디인터레이스 필터는 `analysis.DEINTERLACE`
+- FFmpeg 실행: `media/ffmpeg.py`의 `run_ffmpeg(args, duration=, on_progress=, timeout=)`(stderr 반환, loudnorm 1-pass 측정값 JSON을 stderr에서 읽으면 된다), `probe()`
+- 저장 경로: `storage.py`의 `JobFiles.clip_dir(clip_id)`가 있다 → `final.mp4`를 여기에 추가. 브라우저 다운로드는 `api/media.py`에 라우트 추가(썸네일 `/media/clips/{id}/thumbnail.jpg` 패턴)
+- Celery: 큐 `media`에서 돈다. 클립 단위 태스크 예시는 `pipeline/tasks.py`의 `prepare_clip_after_range`(media 큐), `regenerate_clip_metadata`. 작업 변경 알림은 `publish_job_changed(job_id)`
+- 화면: 클립 편집기 `frontend/src/pages/ClipEditorPage.tsx`(승인 영역 `approve-box`), 작업 상세 클립 목록 `JobDetailPage.tsx`, 상태 이름 `labels.ts`의 `CLIP_STATUS_LABEL`(RENDERING/RENDERED 추가 필요). 일괄 승인은 `BulkBar`
+- 재실행 보호(`review.reviewed_clips`, 검수한 클립이 있으면 단계 재시도 409): 렌더된 클립도 "검수한 클립"이다(상태가 바뀌니 `REVIEWED` 집합 확인)
+- 테스트: `tests/test_review.py`의 `reviewed` 픽스처(합성 원본 영상 + 클립 3개, `tests/test_thumbnails.job_with_source`)를 그대로 쓸 수 있다. E2E는 `frontend/e2e/review.spec.ts`(승인까지) → 렌더 완료·다운로드 확인을 덧붙이면 된다. Celery는 테스트에서 즉시 실행된다
+
+**만들 것 (제안)**
+- `backend/app/render/`: 렌더 명령(원본 `-ss START -i SRC -t DUR`이 아니라 **출력 쪽에서 길이**: PoC 규칙대로 `-ss`는 입력 쪽 탐색 + `-t`로 길이, `-to` 금지), H.264 High CRF 18, 최대 1080p(설정값), AAC 192k 48kHz, `+faststart`, 인터레이스면 디인터레이스, loudnorm 2-pass(-14 LUFS, 1차 측정 → 2차 `measured_*` 적용), 페이드 인 0.2초/아웃 0.3초(옵션, 기본값은 정할 것)
+- 검증(6.2): ffprobe 길이 ±0.1초, 오디오 스트림 존재, 실패 시 재시도(RetryableStepError 같은 일시 오류만), 최종 실패면 클립에 오류 기록(`Clip.render_error` 같은 칼럼 → 마이그레이션 0010)
+- 상태 흐름: 승인 → 렌더 태스크 큐(`RENDERING`) → 성공 `RENDERED` + `render_path` / 실패 시 상태 표시와 재시도 API(`POST /api/clips/{id}/render`). 다시 열기 → `final.mp4` 삭제·`render_path` 비움
+- 6.4: 편집기·목록에 렌더 상태, 렌더 결과 재생(`<video src=/media/clips/{id}/final.mp4>`)과 다운로드(수동 게시용), 썸네일 다운로드
+- 테스트(DoD): 합성 영상에서 **렌더 첫 프레임 = 검수 화면에서 지정한 시각의 프레임**(색이 다른 장면 경계에 구간을 두고 첫·마지막 프레임 색 확인, 프레임 번호를 그린 영상이면 더 확실: `drawtext=text='%{n}'`), 길이 ±0.1초, 오디오 있음, loudnorm 적용 후 음량 측정, 오디오가 먼저 시작하는 원본(`start_offset`, `video_start` > 0)
+
+**주의점**
+- 시각은 모두 **파일 시작 기준**이다. 입력 쪽 `-ss`는 파일 시작 시각을 더해 탐색하므로 맞지만, 비디오 스트림이 늦게 시작하는 파일(`probe.video_start > 0`)에서 오디오·비디오가 같이 잘리는지 확인한다
+- 썸네일 프레임 추출(`thumbnails/candidates.extract_frame`)이 같은 탐색 방식을 쓴다. 렌더 첫 프레임과 썸네일 프레임이 같은 축인지 테스트로 묶어 두면 좋다
+- 렌더는 원본 화질이라 오래 걸린다(2분 클립 1080i, CPU). media 워커 동시 실행 수(`MEDIA_CONCURRENCY`)를 고려하고 진행률을 알린다
+
+**사용자에게 받을 것 / 정할 것**
+- 페이드 인·아웃 기본값(켤지), 목표 음량(-14 LUFS 기본), 최대 해상도(1080p 기본)
+- 실제 원본(HD) 녹화본으로 렌더 시간·화질 확인은 녹화본이 필요하다(축소본으로 대신해도 되는지)
+
 ---
 
 ## M7. YouTube 업로드·예약 발행 (파이프라인 9)
